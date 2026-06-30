@@ -2,8 +2,6 @@ from calibre.gui2 import error_dialog, info_dialog
 from calibre.gui2.actions import InterfaceAction
 from qt.core import QMenu, QProgressDialog, Qt
 
-CALIBRE_STARS_MULTIPLIER = 2
-
 
 class BlogRatingSyncAction(InterfaceAction):
     name = "Blog Rating Sync"

@@ -5,6 +5,7 @@ from calibre_plugins.blog_rating_sync.scraper import (
     find_canonical_url,
     match_score,
 )
+from calibre_plugins.blog_rating_sync.sync import CALIBRE_STARS_MULTIPLIER
 from qt.core import (
     QAbstractTableModel,
     QDialog,
@@ -19,11 +20,9 @@ from qt.core import (
     pyqtSignal,
 )
 
-CALIBRE_STARS_MULTIPLIER = 2
-
 
 class _FetchWorker(QThread):
-    finished = pyqtSignal(str, str)
+    succeeded = pyqtSignal(str, str)
     failed = pyqtSignal(str)
 
     def __init__(self, url):
@@ -33,7 +32,7 @@ class _FetchWorker(QThread):
     def run(self):
         try:
             html = fetch_page(self._url)
-            self.finished.emit(self._url, html)
+            self.succeeded.emit(self._url, html)
         except Exception as error:
             self.failed.emit(str(error))
 
@@ -91,7 +90,7 @@ class LinkDialog(QDialog):
         self.fetch_button.setEnabled(False)
         self.status_label.setText("Fetching...")
         self._fetch_thread = _FetchWorker(url)
-        self._fetch_thread.finished.connect(self._on_fetch_finished)
+        self._fetch_thread.succeeded.connect(self._on_fetch_succeeded)
         self._fetch_thread.failed.connect(self._on_fetch_failed)
         self._fetch_thread.start()
 
@@ -99,15 +98,17 @@ class LinkDialog(QDialog):
         self.status_label.setText(f"Error: {error_message}")
         self.fetch_button.setEnabled(True)
 
-    def _on_fetch_finished(self, url, html):
+    def _on_fetch_succeeded(self, url, html):
         self.fetch_button.setEnabled(True)
+        self._fetched_url = url
 
         canonical = find_canonical_url(html)
-        if canonical and canonical != url:
-            self.status_label.setText(f"Following canonical URL: {canonical}")
-            self._fetched_url = canonical
-        else:
-            self._fetched_url = url
+        if canonical and canonical.rstrip("/") != url.rstrip("/"):
+            self.status_label.setText(
+                f"This is an old review. Canonical URL: {canonical}\n"
+                f"Use the canonical URL instead."
+            )
+            return
 
         blog_title, blog_authors = extract_book_info(html)
         blog_rating = extract_rating(html)

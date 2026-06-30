@@ -1,9 +1,5 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin"))
-
 from scraper import (
+    _normalize_rating,
     extract_book_info,
     extract_jsonld_blocks,
     extract_rating,
@@ -43,6 +39,16 @@ def test_extract_jsonld_blocks():
     assert blocks[0]["@type"] == "Review"
 
 
+def test_extract_jsonld_blocks_skips_malformed():
+    html = """
+    <script type="application/ld+json">{not valid json}</script>
+    <script type="application/ld+json">{"@type": "Review"}</script>
+    """
+    blocks = extract_jsonld_blocks(html)
+    assert len(blocks) == 1
+    assert blocks[0]["@type"] == "Review"
+
+
 def test_extract_rating():
     assert extract_rating(SAMPLE_HTML) == 4
 
@@ -51,12 +57,64 @@ def test_extract_rating_missing():
     assert extract_rating("<html><body>no json-ld</body></html>") is None
 
 
-def test_extract_rating_fractional():
+def test_extract_rating_fractional_rounds_up():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "reviewRating": {"@type": "Rating", "ratingValue": "4.5"}
     }</script>"""
+    assert extract_rating(html) == 5
+
+
+def test_extract_rating_fractional_rounds_down():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "reviewRating": {"@type": "Rating", "ratingValue": "4.4"}
+    }</script>"""
     assert extract_rating(html) == 4
+
+
+def test_extract_rating_normalizes_best_rating():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "reviewRating": {
+        "@type": "Rating",
+        "ratingValue": "8",
+        "bestRating": "10",
+        "worstRating": "1"
+      }
+    }</script>"""
+    assert extract_rating(html) == 4
+
+
+def test_extract_rating_from_graph():
+    html = """<script type="application/ld+json">{
+      "@graph": [
+        {"@type": "WebPage", "name": "page"},
+        {"@type": "Review", "reviewRating": {"ratingValue": "3"}}
+      ]
+    }</script>"""
+    assert extract_rating(html) == 3
+
+
+def test_normalize_rating_non_numeric():
+    assert _normalize_rating({"ratingValue": "excellent"}) is None
+
+
+def test_normalize_rating_none_value():
+    assert _normalize_rating({"ratingValue": None}) is None
+
+
+def test_normalize_rating_missing_value():
+    assert _normalize_rating({}) is None
+
+
+def test_normalize_rating_equal_best_worst():
+    assert _normalize_rating({"ratingValue": "3", "bestRating": "5", "worstRating": "5"}) is None
+
+
+def test_normalize_rating_clamps_to_range():
+    result = _normalize_rating({"ratingValue": "11", "bestRating": "10", "worstRating": "1"})
+    assert result == 5
 
 
 def test_extract_book_info():

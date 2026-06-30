@@ -1,5 +1,3 @@
-from urllib.error import URLError
-
 from calibre_plugins.blog_rating_sync.config import prefs
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
 from calibre_plugins.blog_rating_sync.scraper import (
@@ -9,19 +7,37 @@ from calibre_plugins.blog_rating_sync.scraper import (
     match_score,
 )
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
+from calibre_plugins.blog_rating_sync.sync import CALIBRE_STARS_MULTIPLIER
 from qt.core import (
     QAbstractTableModel,
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QProgressDialog,
     QPushButton,
     QTableView,
+    QThread,
     QVBoxLayout,
     Qt,
 )
 
-AUTO_CHECK_THRESHOLD = 4
+AUTO_CHECK_THRESHOLD = 0.7
+MINIMUM_MATCH_SCORE = 0.3
+
+
+class _SitemapFetchThread(QThread):
+    def __init__(self, sitemap_url):
+        super().__init__()
+        self._sitemap_url = sitemap_url
+        self.urls = []
+        self.error = None
+
+    def run(self):
+        try:
+            self.urls = fetch_book_urls(self._sitemap_url)
+        except Exception as error:
+            self.error = str(error)
 
 
 class BulkLinkDialog(QDialog):
@@ -56,6 +72,9 @@ class BulkLinkDialog(QDialog):
         layout.addLayout(button_row)
 
         self._matches = []
+        self._calibre_books = {}
+        self._already_linked_urls = set()
+        self._sitemap_thread = None
         self._fetch_thread = None
         self._fetch_worker = None
 
@@ -74,24 +93,31 @@ class BulkLinkDialog(QDialog):
             authors = self.db.field_for("authors", book_id) or ()
             calibre_books[book_id] = (title, list(authors))
 
-        try:
-            all_blog_urls = fetch_book_urls(sitemap_url)
-        except (URLError, OSError) as error:
-            self.status_label.setText(f"Failed to fetch sitemap: {error}")
+        self._calibre_books = calibre_books
+        self._already_linked_urls = already_linked_urls
+
+        self._sitemap_thread = _SitemapFetchThread(sitemap_url)
+        self._sitemap_thread.finished.connect(self._on_sitemap_fetched)
+        self._sitemap_thread.start()
+
+    def _on_sitemap_fetched(self):
+        thread = self._sitemap_thread
+        self._sitemap_thread = None
+
+        if thread.error:
+            self.status_label.setText(f"Failed to fetch sitemap: {thread.error}")
             return
 
         unlinked_urls = [
-            url for url in all_blog_urls
-            if url.rstrip("/") not in already_linked_urls
+            url for url in thread.urls
+            if url.rstrip("/") not in self._already_linked_urls
         ]
 
         if not unlinked_urls:
             self.status_label.setText(
-                f"All {len(all_blog_urls)} blog reviews are already linked."
+                f"All {len(thread.urls)} blog reviews are already linked."
             )
             return
-
-        self._calibre_books = calibre_books
 
         self._progress = QProgressDialog(
             "Fetching blog reviews...", "Cancel", 0, len(unlinked_urls), self
@@ -133,7 +159,7 @@ class BulkLinkDialog(QDialog):
                 continue
 
             best_id = None
-            best_score = 0
+            best_score = 0.0
             for book_id, (calibre_title, calibre_authors) in self._calibre_books.items():
                 if book_id in claimed_book_ids:
                     continue
@@ -144,7 +170,7 @@ class BulkLinkDialog(QDialog):
                     best_score = score
                     best_id = book_id
 
-            if best_id is None:
+            if best_id is None or best_score < MINIMUM_MATCH_SCORE:
                 continue
 
             claimed_book_ids.add(best_id)
@@ -179,17 +205,34 @@ class BulkLinkDialog(QDialog):
         self._fetch_worker = None
 
     def _on_link_all(self):
-        count = 0
-        for match in self._matches:
-            if not match["is_checked"]:
-                continue
+        checked_matches = [m for m in self._matches if m["is_checked"]]
+        if not checked_matches:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Bulk Link",
+            f"Link {len(checked_matches)} book(s) and update their ratings?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        rating_count = 0
+        for match in checked_matches:
             self.db.set_field(
                 self.column, {match["calibre_id"]: match["blog_url"]}
             )
-            count += 1
+            if match["blog_rating"] is not None:
+                new_rating = match["blog_rating"] * CALIBRE_STARS_MULTIPLIER
+                self.db.set_field("rating", {match["calibre_id"]: new_rating})
+                rating_count += 1
 
-        self.linked_count = count
-        self.status_label.setText(f"Linked {count} book(s).")
+        self.linked_count = len(checked_matches)
+        self.status_label.setText(
+            f"Linked {self.linked_count} book(s), updated {rating_count} rating(s)."
+        )
         self.link_button.setEnabled(False)
 
 
@@ -249,7 +292,7 @@ class _BulkMatchModel(QAbstractTableModel):
         if column == 5:
             return row["calibre_authors"]
         if column == 6:
-            return str(row["score"])
+            return f"{row['score']:.0%}"
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):

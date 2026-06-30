@@ -1,16 +1,41 @@
 import xml.etree.ElementTree as ET
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 SITEMAP_NAMESPACE = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+ALLOWED_SCHEMES = {"http", "https"}
+FETCH_TIMEOUT_SECONDS = 15
+MAX_SITEMAP_DEPTH = 3
+USER_AGENT = "CalibreBlogRatingSync/0.1 (Calibre plugin; +https://github.com)"
 
 
-def fetch_book_urls(sitemap_url, path_prefix="/books/"):
-    """Fetch all book review URLs from a sitemap.xml."""
-    response = urlopen(sitemap_url, timeout=15).read()
+def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
+    """Fetch all book review URLs from a sitemap.xml.
+
+    Handles both flat urlset sitemaps and sitemap index files.
+    """
+    if _depth > MAX_SITEMAP_DEPTH:
+        return []
+
+    parsed = urlparse(sitemap_url)
+    if parsed.scheme not in ALLOWED_SCHEMES:
+        raise ValueError(f"URL scheme '{parsed.scheme}' not allowed")
+
+    request = Request(sitemap_url, headers={"User-Agent": USER_AGENT})
+    response = urlopen(request, timeout=FETCH_TIMEOUT_SECONDS).read()
     root = ET.fromstring(response)
-    urls = [
+
+    sub_sitemaps = root.findall(".//sm:sitemap/sm:loc", SITEMAP_NAMESPACE)
+    if sub_sitemaps:
+        urls = []
+        for loc in sub_sitemaps:
+            if loc.text:
+                urls.extend(fetch_book_urls(loc.text, path_prefix, _depth + 1))
+        return urls
+
+    all_urls = [
         loc.text
         for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE)
         if loc.text
     ]
-    return [url for url in urls if path_prefix in url]
+    return [url for url in all_urls if path_prefix in url]

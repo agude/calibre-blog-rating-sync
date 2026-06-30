@@ -1,8 +1,3 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin"))
-
 from sync import apply_fetched_ratings, collect_linked_books
 
 REVIEW_HTML = """<script type="application/ld+json">{

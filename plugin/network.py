@@ -1,15 +1,31 @@
 import time
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from qt.core import QObject, QThread, pyqtSignal
 
 FETCH_TIMEOUT_SECONDS = 10
-REQUEST_DELAY_SECONDS = 0.1
+REQUEST_DELAY_SECONDS = 0.5
+ALLOWED_SCHEMES = {"http", "https"}
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+USER_AGENT = "CalibreBlogRatingSync/0.1 (Calibre plugin; +https://github.com)"
+
+
+def validate_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ALLOWED_SCHEMES:
+        raise ValueError(f"URL scheme '{parsed.scheme}' not allowed, must be http or https")
 
 
 def fetch_page(url):
-    return urlopen(url, timeout=FETCH_TIMEOUT_SECONDS).read().decode("utf-8")
+    validate_url(url)
+    request = Request(url, headers={"User-Agent": USER_AGENT})
+    response = urlopen(request, timeout=FETCH_TIMEOUT_SECONDS)
+    data = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise ValueError(f"Response exceeds {MAX_RESPONSE_BYTES} bytes")
+    return data.decode("utf-8")
 
 
 class BatchFetchWorker(QObject):
@@ -36,7 +52,7 @@ class BatchFetchWorker(QObject):
             try:
                 html = fetch_page(url)
                 results.append((url, html, None))
-            except (URLError, OSError) as error:
+            except (URLError, OSError, ValueError) as error:
                 results.append((url, None, str(error)))
             if index < total - 1:
                 time.sleep(REQUEST_DELAY_SECONDS)

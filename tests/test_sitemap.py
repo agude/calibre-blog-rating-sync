@@ -1,8 +1,4 @@
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin"))
 
 from sitemap import fetch_book_urls
 
@@ -48,3 +44,11 @@ def test_fetch_book_urls_with_namespace_prefix():
     assert len(urls) == 2
     assert "https://alexgude.com/books/hyperion/" in urls
     assert "https://alexgude.com/books/blindsight/" in urls
+
+
+def test_rejects_file_scheme():
+    try:
+        fetch_book_urls("file:///etc/passwd")
+        assert False, "Should have raised ValueError"
+    except ValueError as error:
+        assert "not allowed" in str(error)
