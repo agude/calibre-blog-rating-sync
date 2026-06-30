@@ -44,6 +44,33 @@ class _SitemapFetchThread(QThread):
             self.error = str(error)
 
 
+def _filter_mutual_best(matches):
+    """Return only matches where the blog URL is the best claimant for its top Calibre book.
+
+    Prevents multiple blog posts from all mapping to the same Calibre book.
+    Each Calibre book can be the top candidate for at most one row.
+    """
+    best_blog_for_calibre = {}  # calibre_id -> (score, blog_url)
+    for match in matches:
+        top = match["candidates"][0]
+        cid = top["calibre_id"]
+        score = top["score"]
+        if cid not in best_blog_for_calibre or score > best_blog_for_calibre[cid][0]:
+            best_blog_for_calibre[cid] = (score, match["blog_url"])
+    winning_urls = {url for _, url in best_blog_for_calibre.values()}
+    return [m for m in matches if m["blog_url"] in winning_urls]
+
+
+def _find_conflict_rows(data, current_row, calibre_id):
+    """Return all row indices (excluding current_row) that have calibre_id selected."""
+    return [
+        row for row, match in enumerate(data)
+        if row != current_row
+        and match["selected_index"] > 0
+        and match["candidates"][match["selected_index"] - 1]["calibre_id"] == calibre_id
+    ]
+
+
 class _CandidateComboDelegate(QStyledItemDelegate):
     """ComboBox delegate for the Calibre match column."""
 
@@ -230,18 +257,7 @@ class BulkLinkDialog(QDialog):
                 "selected_index": selected_index,
             })
 
-        # For each Calibre book, find the blog URL that scores highest against it.
-        # Only keep rows where this blog URL is the best claimant for at least one
-        # Calibre book — prevents many blog posts all mapping to the same book.
-        best_blog_for_calibre = {}  # calibre_id -> (score, blog_url)
-        for match in matches:
-            top = match["candidates"][0]
-            cid = top["calibre_id"]
-            score = top["score"]
-            if cid not in best_blog_for_calibre or score > best_blog_for_calibre[cid][0]:
-                best_blog_for_calibre[cid] = (score, match["blog_url"])
-        winning_urls = {url for _, url in best_blog_for_calibre.values()}
-        matches = [m for m in matches if m["blog_url"] in winning_urls]
+        matches = _filter_mutual_best(matches)
 
         self._matches = sorted(matches, key=lambda m: -m["candidates"][0]["score"])
         model = _BulkMatchModel(self._matches)
@@ -378,22 +394,16 @@ class _BulkMatchModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if index.column() != self.COL_CALIBRE_MATCH or role != Qt.ItemDataRole.EditRole:
             return False
+        if not isinstance(value, int):
+            return False
 
         new_idx = value
         current_row = index.row()
 
         if new_idx > 0:
             target_id = self._data[current_row]["candidates"][new_idx - 1]["calibre_id"]
-            # Collect ALL rows (not just the first) that already have this book selected.
-            conflict_rows = [
-                row for row, match in enumerate(self._data)
-                if row != current_row
-                and match["selected_index"] > 0
-                and match["candidates"][match["selected_index"] - 1]["calibre_id"] == target_id
-            ]
+            conflict_rows = _find_conflict_rows(self._data, current_row, target_id)
             if conflict_rows:
-                # Reset every conflict row AND the incoming row to Skip so all are
-                # free for the next run.
                 for row in conflict_rows + [current_row]:
                     self._data[row]["selected_index"] = 0
                     self.dataChanged.emit(
