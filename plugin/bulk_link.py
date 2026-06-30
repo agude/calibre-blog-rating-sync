@@ -60,14 +60,16 @@ class _CandidateComboDelegate(QStyledItemDelegate):
             combo.addItem(label, candidate)
         selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
         combo.setCurrentIndex(selected)
+        # activated fires only on user interaction, not programmatic setCurrentIndex,
+        # so this won't loop when setEditorData syncs the combo after dataChanged.
+        combo.activated.connect(
+            lambda i: index.model().setData(index, i, Qt.ItemDataRole.EditRole)
+        )
         return combo
 
     def setEditorData(self, editor, index):
         selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
         editor.setCurrentIndex(selected)
-
-    def setModelData(self, editor, model, index):
-        model.setData(index, editor.currentIndex(), Qt.ItemDataRole.EditRole)
 
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
@@ -222,9 +224,26 @@ class BulkLinkDialog(QDialog):
                 "selected_index": selected_index,
             })
 
+        # For each Calibre book, find the blog URL that scores highest against it.
+        # Only keep rows where this blog URL is the best claimant for at least one
+        # Calibre book — prevents many blog posts all mapping to the same book.
+        best_blog_for_calibre = {}  # calibre_id -> (score, blog_url)
+        for match in matches:
+            top = match["candidates"][0]
+            cid = top["calibre_id"]
+            score = top["score"]
+            if cid not in best_blog_for_calibre or score > best_blog_for_calibre[cid][0]:
+                best_blog_for_calibre[cid] = (score, match["blog_url"])
+        winning_urls = {url for _, url in best_blog_for_calibre.values()}
+        matches = [m for m in matches if m["blog_url"] in winning_urls]
+
         self._matches = sorted(matches, key=lambda m: -m["candidates"][0]["score"])
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)
+        for row in range(model.rowCount()):
+            self.table.openPersistentEditor(
+                model.index(row, _BulkMatchModel.COL_CALIBRE_MATCH)
+            )
         self.table.resizeColumnsToContents()
         self.link_button.setEnabled(bool(matches))
 
@@ -353,7 +372,30 @@ class _BulkMatchModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if index.column() != self.COL_CALIBRE_MATCH or role != Qt.ItemDataRole.EditRole:
             return False
-        self._data[index.row()]["selected_index"] = value
-        score_index = self.index(index.row(), self.COL_SCORE)
-        self.dataChanged.emit(index, score_index)
+
+        new_idx = value
+        current_row = index.row()
+
+        if new_idx > 0:
+            target_id = self._data[current_row]["candidates"][new_idx - 1]["calibre_id"]
+            # Collect ALL rows (not just the first) that already have this book selected.
+            conflict_rows = [
+                row for row, match in enumerate(self._data)
+                if row != current_row
+                and match["selected_index"] > 0
+                and match["candidates"][match["selected_index"] - 1]["calibre_id"] == target_id
+            ]
+            if conflict_rows:
+                # Reset every conflict row AND the incoming row to Skip so all are
+                # free for the next run.
+                for row in conflict_rows + [current_row]:
+                    self._data[row]["selected_index"] = 0
+                    self.dataChanged.emit(
+                        self.index(row, self.COL_CALIBRE_MATCH),
+                        self.index(row, self.COL_SCORE),
+                    )
+                return True
+
+        self._data[current_row]["selected_index"] = new_idx
+        self.dataChanged.emit(index, self.index(current_row, self.COL_SCORE))
         return True
