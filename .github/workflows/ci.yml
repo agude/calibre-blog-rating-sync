@@ -32,7 +32,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: BlogRatingSync
-          path: BlogRatingSync.zip
+          path: plugin/*
 
   release:
     runs-on: ubuntu-latest
