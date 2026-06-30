@@ -1,25 +1,41 @@
-from urllib.request import urlopen
-from urllib.error import URLError
-
-from calibre_plugins.blog_rating_sync.config import prefs
+from calibre_plugins.blog_rating_sync.network import fetch_page
 from calibre_plugins.blog_rating_sync.scraper import (
     extract_book_info,
     extract_rating,
     find_canonical_url,
+    match_score,
 )
 from qt.core import (
     QAbstractTableModel,
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
     QTableView,
+    QThread,
     QVBoxLayout,
     Qt,
+    pyqtSignal,
 )
+
+CALIBRE_STARS_MULTIPLIER = 2
+
+
+class _FetchWorker(QThread):
+    finished = pyqtSignal(str, str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, url):
+        super().__init__()
+        self._url = url
+
+    def run(self):
+        try:
+            html = fetch_page(self._url)
+            self.finished.emit(self._url, html)
+        except Exception as error:
+            self.failed.emit(str(error))
 
 
 class LinkDialog(QDialog):
@@ -39,9 +55,9 @@ class LinkDialog(QDialog):
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("https://alexgude.com/books/hyperion/")
         url_row.addWidget(self.url_edit)
-        fetch_btn = QPushButton("Fetch")
-        fetch_btn.clicked.connect(self._on_fetch)
-        url_row.addWidget(fetch_btn)
+        self.fetch_button = QPushButton("Fetch")
+        self.fetch_button.clicked.connect(self._on_fetch)
+        url_row.addWidget(self.fetch_button)
         layout.addLayout(url_row)
 
         self.status_label = QLabel("")
@@ -53,30 +69,38 @@ class LinkDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
-        btn_box = QHBoxLayout()
-        self.link_btn = QPushButton("Link selected book")
-        self.link_btn.setEnabled(False)
-        self.link_btn.clicked.connect(self._on_link)
-        btn_box.addWidget(self.link_btn)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        btn_box.addWidget(close_btn)
-        layout.addLayout(btn_box)
+        button_row = QHBoxLayout()
+        self.link_button = QPushButton("Link selected book")
+        self.link_button.setEnabled(False)
+        self.link_button.clicked.connect(self._on_link)
+        button_row.addWidget(self.link_button)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        button_row.addWidget(close_button)
+        layout.addLayout(button_row)
 
         self._fetched_url = None
         self._candidates = []
+        self._fetch_thread = None
 
     def _on_fetch(self):
         url = self.url_edit.text().strip()
         if not url:
             return
 
+        self.fetch_button.setEnabled(False)
         self.status_label.setText("Fetching...")
-        try:
-            html = urlopen(url, timeout=10).read().decode("utf-8")
-        except (URLError, OSError) as e:
-            self.status_label.setText(f"Error: {e}")
-            return
+        self._fetch_thread = _FetchWorker(url)
+        self._fetch_thread.finished.connect(self._on_fetch_finished)
+        self._fetch_thread.failed.connect(self._on_fetch_failed)
+        self._fetch_thread.start()
+
+    def _on_fetch_failed(self, error_message):
+        self.status_label.setText(f"Error: {error_message}")
+        self.fetch_button.setEnabled(True)
+
+    def _on_fetch_finished(self, url, html):
+        self.fetch_button.setEnabled(True)
 
         canonical = find_canonical_url(html)
         if canonical and canonical != url:
@@ -91,10 +115,10 @@ class LinkDialog(QDialog):
             self.status_label.setText("No book review found in page JSON-LD.")
             return
 
-        author_str = ", ".join(blog_authors) if blog_authors else "Unknown"
-        rating_str = f" (rating: {blog_rating})" if blog_rating else ""
+        author_string = ", ".join(blog_authors) if blog_authors else "Unknown"
+        rating_string = f" (rating: {blog_rating})" if blog_rating else ""
         self.status_label.setText(
-            f'Found: "{blog_title}" by {author_str}{rating_str}\n'
+            f'Found: "{blog_title}" by {author_string}{rating_string}\n'
             f"Select a matching book from your library below:"
         )
 
@@ -102,40 +126,34 @@ class LinkDialog(QDialog):
 
     def _find_candidates(self, blog_title, blog_authors):
         candidates = []
-        blog_title_lower = blog_title.lower()
-        blog_author_words = {
-            w.lower() for a in blog_authors for w in a.split()
-        }
 
         for book_id in self.db.all_book_ids():
-            title = self.db.field_for("title", book_id)
-            authors = self.db.field_for("authors", book_id) or ()
+            calibre_title = self.db.field_for("title", book_id)
+            calibre_authors = self.db.field_for("authors", book_id) or ()
 
-            title_lower = title.lower() if title else ""
-            if blog_title_lower not in title_lower and title_lower not in blog_title_lower:
-                continue
-
-            author_words = {w.lower() for a in authors for w in a.split()}
-            if blog_author_words and not blog_author_words & author_words:
+            score = match_score(blog_title, blog_authors, calibre_title, list(calibre_authors))
+            if score == 0:
                 continue
 
             existing_url = self.db.field_for(self.column, book_id) or ""
             rating = self.db.field_for("rating", book_id) or 0
             candidates.append({
                 "id": book_id,
-                "title": title,
-                "authors": ", ".join(authors),
-                "rating": rating // 2,
+                "title": calibre_title,
+                "authors": ", ".join(calibre_authors),
+                "rating": rating // CALIBRE_STARS_MULTIPLIER,
                 "linked": existing_url,
+                "score": score,
             })
 
+        candidates.sort(key=lambda candidate: -candidate["score"])
         self._candidates = candidates
         model = _CandidateModel(candidates)
         self.table.setModel(model)
         self.table.selectionModel().selectionChanged.connect(
-            lambda: self.link_btn.setEnabled(True)
+            lambda: self.link_button.setEnabled(True)
         )
-        self.link_btn.setEnabled(False)
+        self.link_button.setEnabled(False)
 
         if not candidates:
             self.status_label.setText(
@@ -149,15 +167,14 @@ class LinkDialog(QDialog):
 
         row = indexes[0].row()
         candidate = self._candidates[row]
-        book_id = candidate["id"]
 
-        self.db.set_field(self.column, {book_id: self._fetched_url})
+        self.db.set_field(self.column, {candidate["id"]: self._fetched_url})
         self.linked_count += 1
 
         self.status_label.setText(
             f'Linked "{candidate["title"]}" → {self._fetched_url}'
         )
-        self.link_btn.setEnabled(False)
+        self.link_button.setEnabled(False)
         self.url_edit.clear()
 
 
@@ -183,13 +200,13 @@ class _CandidateModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         row = self._data[index.row()]
-        col = index.column()
-        if col == 0:
+        column = index.column()
+        if column == 0:
             return row["title"]
-        if col == 1:
+        if column == 1:
             return row["authors"]
-        if col == 2:
+        if column == 2:
             return str(row["rating"]) if row["rating"] else ""
-        if col == 3:
+        if column == 3:
             return row["linked"]
         return None

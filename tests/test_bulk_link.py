@@ -44,3 +44,18 @@ def test_title_match_author_mismatch():
 def test_no_authors():
     score = match_score("Hyperion", [], "Hyperion", ["Dan Simmons"])
     assert score == 3
+
+
+def test_short_title_no_false_positive():
+    score = match_score("It", ["Stephen King"], "Permit to Dream", ["Someone"])
+    assert score == 0
+
+
+def test_short_exact_title_still_matches():
+    score = match_score("It", ["Stephen King"], "It", ["King, Stephen"])
+    assert score == 5
+
+
+def test_short_substring_blocked():
+    score = match_score("Red", ["Author"], "The Red Badge of Courage", ["Author"])
+    assert score == 0

@@ -3,7 +3,7 @@
 PLUGIN_NAME = BlogRatingSync.zip
 
 build:
-	cd plugin && zip -r ../$(PLUGIN_NAME) . -x '__pycache__/*' '*.pyc'
+	cd plugin && zip -r ../$(PLUGIN_NAME) . -x '*__pycache__*' '*.pyc'
 
 test:
 	uv run pytest

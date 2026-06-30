@@ -51,6 +51,14 @@ def test_extract_rating_missing():
     assert extract_rating("<html><body>no json-ld</body></html>") is None
 
 
+def test_extract_rating_fractional():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "reviewRating": {"@type": "Rating", "ratingValue": "4.5"}
+    }</script>"""
+    assert extract_rating(html) == 4
+
+
 def test_extract_book_info():
     title, authors = extract_book_info(SAMPLE_HTML)
     assert title == "Hyperion"
