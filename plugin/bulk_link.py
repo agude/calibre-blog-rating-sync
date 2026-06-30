@@ -10,20 +10,24 @@ from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 from calibre_plugins.blog_rating_sync.sync import CALIBRE_STARS_MULTIPLIER
 from qt.core import (
     QAbstractTableModel,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QStyledItemDelegate,
     QTableView,
     QThread,
     QVBoxLayout,
     Qt,
 )
 
-AUTO_CHECK_THRESHOLD = 0.7
+AUTO_SELECT_THRESHOLD = 0.7
 MINIMUM_MATCH_SCORE = 0.3
+TOP_N_CANDIDATES = 5
+SKIP_LABEL = "— Skip —"
 
 
 class _SitemapFetchThread(QThread):
@@ -38,6 +42,35 @@ class _SitemapFetchThread(QThread):
             self.urls = fetch_book_urls(self._sitemap_url)
         except Exception as error:
             self.error = str(error)
+
+
+class _CandidateComboDelegate(QStyledItemDelegate):
+    """ComboBox delegate for the Calibre match column."""
+
+    def createEditor(self, parent, option, index):
+        if index.column() != _BulkMatchModel.COL_CALIBRE_MATCH:
+            return super().createEditor(parent, option, index)
+        combo = QComboBox(parent)
+        candidates = index.data(_BulkMatchModel.CANDIDATES_ROLE)
+        if candidates is None:
+            return combo
+        combo.addItem(SKIP_LABEL, None)
+        for candidate in candidates:
+            label = f"{candidate['calibre_title']} — {candidate['calibre_authors']} ({candidate['score']:.0%})"
+            combo.addItem(label, candidate)
+        selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
+        combo.setCurrentIndex(selected)
+        return combo
+
+    def setEditorData(self, editor, index):
+        selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
+        editor.setCurrentIndex(selected)
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentIndex(), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
 
 
 class BulkLinkDialog(QDialog):
@@ -58,10 +91,11 @@ class BulkLinkDialog(QDialog):
         self.table = QTableView()
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setItemDelegate(_CandidateComboDelegate(self.table))
         layout.addWidget(self.table)
 
         button_row = QHBoxLayout()
-        self.link_button = QPushButton("Link all checked")
+        self.link_button = QPushButton("Link all selected")
         self.link_button.clicked.connect(self._on_link_all)
         self.link_button.setEnabled(False)
         button_row.addWidget(self.link_button)
@@ -137,7 +171,6 @@ class BulkLinkDialog(QDialog):
     def _on_fetch_complete(self, fetch_results):
         self._progress.setValue(self._progress.maximum())
 
-        claimed_book_ids = set()
         matches = []
         skipped_canonical_count = 0
         error_count = 0
@@ -158,36 +191,38 @@ class BulkLinkDialog(QDialog):
                 error_count += 1
                 continue
 
-            best_id = None
-            best_score = 0.0
+            scored = []
             for book_id, (calibre_title, calibre_authors) in self._calibre_books.items():
-                if book_id in claimed_book_ids:
-                    continue
                 score = match_score(
                     blog_title, blog_authors, calibre_title, calibre_authors
                 )
-                if score > best_score:
-                    best_score = score
-                    best_id = book_id
+                if score >= MINIMUM_MATCH_SCORE:
+                    scored.append({
+                        "calibre_id": book_id,
+                        "calibre_title": calibre_title,
+                        "calibre_authors": ", ".join(calibre_authors),
+                        "score": score,
+                    })
 
-            if best_id is None or best_score < MINIMUM_MATCH_SCORE:
+            scored.sort(key=lambda c: -c["score"])
+            candidates = scored[:TOP_N_CANDIDATES]
+
+            if not candidates:
                 continue
 
-            claimed_book_ids.add(best_id)
-            calibre_title, calibre_authors = self._calibre_books[best_id]
+            best = candidates[0]
+            selected_index = 1 if best["score"] >= AUTO_SELECT_THRESHOLD else 0
+
             matches.append({
-                "is_checked": best_score >= AUTO_CHECK_THRESHOLD,
                 "blog_title": blog_title,
                 "blog_authors": ", ".join(blog_authors),
                 "blog_rating": blog_rating,
                 "blog_url": url,
-                "calibre_id": best_id,
-                "calibre_title": calibre_title,
-                "calibre_authors": ", ".join(calibre_authors),
-                "score": best_score,
+                "candidates": candidates,
+                "selected_index": selected_index,
             })
 
-        self._matches = sorted(matches, key=lambda match: -match["score"])
+        self._matches = sorted(matches, key=lambda m: -m["candidates"][0]["score"])
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)
         self.table.resizeColumnsToContents()
@@ -198,21 +233,28 @@ class BulkLinkDialog(QDialog):
             summary_parts.append(f"{skipped_canonical_count} old reviews skipped (have canonical).")
         if error_count:
             summary_parts.append(f"{error_count} URL(s) failed to fetch.")
-        summary_parts.append("Review the matches and uncheck any that are wrong.")
+        summary_parts.append("Pick the correct Calibre book for each row, or set to Skip.")
         self.status_label.setText(" ".join(summary_parts))
 
         self._fetch_thread = None
         self._fetch_worker = None
 
     def _on_link_all(self):
-        checked_matches = [m for m in self._matches if m["is_checked"]]
-        if not checked_matches:
+        to_link = []
+        for match in self._matches:
+            idx = match["selected_index"]
+            if idx == 0:
+                continue
+            candidate = match["candidates"][idx - 1]
+            to_link.append((match, candidate))
+
+        if not to_link:
             return
 
         reply = QMessageBox.question(
             self,
             "Confirm Bulk Link",
-            f"Link {len(checked_matches)} book(s) and update their ratings?",
+            f"Link {len(to_link)} book(s) and update their ratings?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -220,16 +262,16 @@ class BulkLinkDialog(QDialog):
             return
 
         rating_count = 0
-        for match in checked_matches:
+        for match, candidate in to_link:
             self.db.set_field(
-                self.column, {match["calibre_id"]: match["blog_url"]}
+                self.column, {candidate["calibre_id"]: match["blog_url"]}
             )
             if match["blog_rating"] is not None:
                 new_rating = match["blog_rating"] * CALIBRE_STARS_MULTIPLIER
-                self.db.set_field("rating", {match["calibre_id"]: new_rating})
+                self.db.set_field("rating", {candidate["calibre_id"]: new_rating})
                 rating_count += 1
 
-        self.linked_count = len(checked_matches)
+        self.linked_count = len(to_link)
         self.status_label.setText(
             f"Linked {self.linked_count} book(s), updated {rating_count} rating(s)."
         )
@@ -238,14 +280,21 @@ class BulkLinkDialog(QDialog):
 
 class _BulkMatchModel(QAbstractTableModel):
     HEADERS = [
-        "",
         "Blog Title",
         "Blog Authors",
         "Rating",
-        "Calibre Title",
-        "Calibre Authors",
+        "Calibre Match",
         "Score",
     ]
+
+    COL_BLOG_TITLE = 0
+    COL_BLOG_AUTHORS = 1
+    COL_RATING = 2
+    COL_CALIBRE_MATCH = 3
+    COL_SCORE = 4
+
+    CANDIDATES_ROLE = Qt.ItemDataRole.UserRole + 1
+    SELECTED_INDEX_ROLE = Qt.ItemDataRole.UserRole + 2
 
     def __init__(self, matches):
         super().__init__()
@@ -264,43 +313,47 @@ class _BulkMatchModel(QAbstractTableModel):
 
     def flags(self, index):
         base = super().flags(index)
-        if index.column() == 0:
-            return base | Qt.ItemFlag.ItemIsUserCheckable
+        if index.column() == self.COL_CALIBRE_MATCH:
+            return base | Qt.ItemFlag.ItemIsEditable
         return base
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         row = self._data[index.row()]
         column = index.column()
 
-        if column == 0 and role == Qt.ItemDataRole.CheckStateRole:
-            return (
-                Qt.CheckState.Checked if row["is_checked"]
-                else Qt.CheckState.Unchecked
-            )
+        if column == self.COL_CALIBRE_MATCH:
+            if role == self.CANDIDATES_ROLE:
+                return row["candidates"]
+            if role == self.SELECTED_INDEX_ROLE:
+                return row["selected_index"]
+            if role == Qt.ItemDataRole.DisplayRole:
+                idx = row["selected_index"]
+                if idx == 0:
+                    return SKIP_LABEL
+                candidate = row["candidates"][idx - 1]
+                return f"{candidate['calibre_title']} — {candidate['calibre_authors']}"
+            return None
 
         if role != Qt.ItemDataRole.DisplayRole:
             return None
 
-        if column == 1:
+        if column == self.COL_BLOG_TITLE:
             return row["blog_title"]
-        if column == 2:
+        if column == self.COL_BLOG_AUTHORS:
             return row["blog_authors"]
-        if column == 3:
+        if column == self.COL_RATING:
             return str(row["blog_rating"]) if row["blog_rating"] else ""
-        if column == 4:
-            return row["calibre_title"]
-        if column == 5:
-            return row["calibre_authors"]
-        if column == 6:
-            return f"{row['score']:.0%}"
+        if column == self.COL_SCORE:
+            idx = row["selected_index"]
+            if idx == 0:
+                return ""
+            return f"{row['candidates'][idx - 1]['score']:.0%}"
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
-        if index.column() != 0 or role != Qt.ItemDataRole.CheckStateRole:
+        if index.column() != self.COL_CALIBRE_MATCH or role != Qt.ItemDataRole.EditRole:
             return False
-        self._data[index.row()]["is_checked"] = value in (
-            Qt.CheckState.Checked,
-            Qt.CheckState.Checked.value,
-        )
-        self.dataChanged.emit(index, index)
+        self._data[index.row()]["selected_index"] = value
+        score_index = self.index(index.row(), self.COL_SCORE)
+        self.dataChanged.emit(index, score_index)
         return True
