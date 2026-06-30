@@ -71,6 +71,12 @@ class _CandidateComboDelegate(QStyledItemDelegate):
         selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
         editor.setCurrentIndex(selected)
 
+    def setModelData(self, editor, model, index):
+        # No-op: model updates are handled via combo.activated in createEditor.
+        # Without this override the base class would call model.setData with
+        # editor.currentText() (a string), which breaks setData's int comparisons.
+        pass
+
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
 
