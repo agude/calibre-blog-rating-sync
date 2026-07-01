@@ -9,6 +9,10 @@ SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>https://alexgude.com/books/accelerando/</loc></url>
   <url><loc>https://alexgude.com/blog/some-post/</loc></url>
   <url><loc>https://alexgude.com/books/blindsight/</loc></url>
+  <url><loc>https://alexgude.com/books/authors/dan_simmons/</loc></url>
+  <url><loc>https://alexgude.com/books/series/hyperion_cantos/</loc></url>
+  <url><loc>https://alexgude.com/books/by-rating/</loc></url>
+  <url><loc>https://alexgude.com/books/</loc></url>
 </urlset>"""
 
 PREFIXED_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -30,11 +34,13 @@ def test_fetch_book_urls():
     with patch("sitemap.urlopen", return_value=_mock_urlopen(SAMPLE_SITEMAP)):
         urls = fetch_book_urls("https://alexgude.com/sitemap.xml")
 
-    assert len(urls) == 3
     assert "https://alexgude.com/books/hyperion/" in urls
     assert "https://alexgude.com/books/accelerando/" in urls
     assert "https://alexgude.com/books/blindsight/" in urls
     assert "https://alexgude.com/blog/some-post/" not in urls
+    assert "https://alexgude.com/books/authors/dan_simmons/" not in urls
+    assert "https://alexgude.com/books/series/hyperion_cantos/" not in urls
+    assert "https://alexgude.com/books/" not in urls
 
 
 def test_fetch_book_urls_with_namespace_prefix():

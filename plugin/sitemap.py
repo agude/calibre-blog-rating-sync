@@ -38,4 +38,21 @@ def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
         for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE)
         if loc.text
     ]
-    return [url for url in all_urls if path_prefix in url]
+    return [url for url in all_urls if _is_book_page(url, path_prefix)]
+
+
+def _is_book_page(url, path_prefix):
+    """Match URLs that are direct children of path_prefix, not deeper descendants.
+
+    /books/hyperion/              -> True  (one slug after prefix)
+    /books/authors/someone/       -> False (nested subdirectory)
+    /books/series/culture/        -> False (nested subdirectory)
+    /books/                       -> False (index page, no slug)
+    """
+    path = urlparse(url).path
+    idx = path.find(path_prefix)
+    if idx == -1:
+        return False
+    remainder = path[idx + len(path_prefix):]
+    slug = remainder.strip("/")
+    return bool(slug) and "/" not in slug
