@@ -11,7 +11,7 @@ class BlogRatingSyncAction(InterfaceAction):
         menu = QMenu(self.gui)
         menu.addAction("Sync linked ratings", self.sync_ratings)
         menu.addAction("Bulk link from sitemap...", self.bulk_link)
-        menu.addAction("Link single book...", self.link_single_book)
+        menu.addAction("Link URL to selected book...", self.link_single_book)
         menu.addAction("Unlink selected books", self.unlink_selected_books)
         self.qaction.setMenu(menu)
         self.qaction.triggered.connect(self.sync_ratings)
@@ -120,7 +120,17 @@ class BlogRatingSyncAction(InterfaceAction):
         if column is None:
             return
 
-        dialog = LinkDialog(self.gui, db, column)
+        selected_ids = self.gui.library_view.get_selected_ids()
+        if len(selected_ids) != 1:
+            error_dialog(
+                self.gui,
+                "Blog Rating Sync",
+                "Select exactly one book to link.",
+                show=True,
+            )
+            return
+
+        dialog = LinkDialog(self.gui, db, column, selected_ids[0])
         dialog.exec()
         if dialog.linked_count > 0:
             self.gui.library_view.model().refresh()

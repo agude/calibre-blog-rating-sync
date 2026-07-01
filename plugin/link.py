@@ -3,20 +3,15 @@ from calibre_plugins.blog_rating_sync.scraper import (
     extract_book_info,
     extract_rating,
     find_canonical_url,
-    match_score,
 )
-from calibre_plugins.blog_rating_sync.sync import CALIBRE_STARS_MULTIPLIER
 from qt.core import (
-    QAbstractTableModel,
     QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QTableView,
     QThread,
     QVBoxLayout,
-    Qt,
     pyqtSignal,
 )
 
@@ -38,16 +33,30 @@ class _FetchWorker(QThread):
 
 
 class LinkDialog(QDialog):
-    def __init__(self, parent, db, column):
+    def __init__(self, parent, db, column, book_id):
         super().__init__(parent)
         self.db = db
         self.column = column
+        self.book_id = book_id
         self.linked_count = 0
-        self.setWindowTitle("Link Book to Blog Review")
-        self.resize(700, 400)
+        self.setWindowTitle("Link URL to Selected Book")
+        self.resize(500, 200)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
+
+        title = db.field_for("title", book_id)
+        authors = db.field_for("authors", book_id) or ()
+        author_str = ", ".join(authors) if authors else "Unknown"
+        book_label = QLabel(f'Book: "{title}" by {author_str}')
+        book_label.setWordWrap(True)
+        layout.addWidget(book_label)
+
+        existing_url = db.field_for(column, book_id) or ""
+        if existing_url:
+            existing_label = QLabel(f"Currently linked to: {existing_url}")
+            existing_label.setWordWrap(True)
+            layout.addWidget(existing_label)
 
         url_row = QHBoxLayout()
         url_row.addWidget(QLabel("Review URL:"))
@@ -60,16 +69,11 @@ class LinkDialog(QDialog):
         layout.addLayout(url_row)
 
         self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.table = QTableView()
-        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.table)
-
         button_row = QHBoxLayout()
-        self.link_button = QPushButton("Link selected book")
+        self.link_button = QPushButton("Link")
         self.link_button.setEnabled(False)
         self.link_button.clicked.connect(self._on_link)
         button_row.addWidget(self.link_button)
@@ -79,7 +83,6 @@ class LinkDialog(QDialog):
         layout.addLayout(button_row)
 
         self._fetched_url = None
-        self._candidates = []
         self._fetch_thread = None
 
     def _on_fetch(self):
@@ -88,6 +91,7 @@ class LinkDialog(QDialog):
             return
 
         self.fetch_button.setEnabled(False)
+        self.link_button.setEnabled(False)
         self.status_label.setText("Fetching...")
         self._fetch_thread = _FetchWorker(url)
         self._fetch_thread.succeeded.connect(self._on_fetch_succeeded)
@@ -100,7 +104,6 @@ class LinkDialog(QDialog):
 
     def _on_fetch_succeeded(self, url, html):
         self.fetch_button.setEnabled(True)
-        self._fetched_url = url
 
         canonical = find_canonical_url(html)
         if canonical and canonical.rstrip("/") != url.rstrip("/"):
@@ -119,95 +122,16 @@ class LinkDialog(QDialog):
         author_string = ", ".join(blog_authors) if blog_authors else "Unknown"
         rating_string = f" (rating: {blog_rating})" if blog_rating else ""
         self.status_label.setText(
-            f'Found: "{blog_title}" by {author_string}{rating_string}\n'
-            f"Select a matching book from your library below:"
+            f'Review found: "{blog_title}" by {author_string}{rating_string}'
         )
 
-        self._find_candidates(blog_title, blog_authors)
-
-    def _find_candidates(self, blog_title, blog_authors):
-        candidates = []
-
-        for book_id in self.db.all_book_ids():
-            calibre_title = self.db.field_for("title", book_id)
-            calibre_authors = self.db.field_for("authors", book_id) or ()
-
-            score = match_score(blog_title, blog_authors, calibre_title, list(calibre_authors))
-            if score == 0:
-                continue
-
-            existing_url = self.db.field_for(self.column, book_id) or ""
-            rating = self.db.field_for("rating", book_id) or 0
-            candidates.append({
-                "id": book_id,
-                "title": calibre_title,
-                "authors": ", ".join(calibre_authors),
-                "rating": rating // CALIBRE_STARS_MULTIPLIER,
-                "linked": existing_url,
-                "score": score,
-            })
-
-        candidates.sort(key=lambda candidate: -candidate["score"])
-        self._candidates = candidates
-        model = _CandidateModel(candidates)
-        self.table.setModel(model)
-        self.table.selectionModel().selectionChanged.connect(
-            lambda: self.link_button.setEnabled(True)
-        )
-        self.link_button.setEnabled(False)
-
-        if not candidates:
-            self.status_label.setText(
-                self.status_label.text() + "\n\nNo matching books found in library."
-            )
+        self._fetched_url = url
+        self.link_button.setEnabled(True)
 
     def _on_link(self):
-        indexes = self.table.selectionModel().selectedRows()
-        if not indexes:
-            return
-
-        row = indexes[0].row()
-        candidate = self._candidates[row]
-
-        self.db.set_field(self.column, {candidate["id"]: self._fetched_url})
+        self.db.set_field(self.column, {self.book_id: self._fetched_url})
         self.linked_count += 1
 
-        self.status_label.setText(
-            f'Linked "{candidate["title"]}" → {self._fetched_url}'
-        )
+        title = self.db.field_for("title", self.book_id)
+        self.status_label.setText(f'Linked "{title}" → {self._fetched_url}')
         self.link_button.setEnabled(False)
-        self.url_edit.clear()
-
-
-class _CandidateModel(QAbstractTableModel):
-    HEADERS = ["Title", "Authors", "Rating", "Already linked"]
-
-    def __init__(self, candidates):
-        super().__init__()
-        self._data = candidates
-
-    def rowCount(self, parent=None):
-        return len(self._data)
-
-    def columnCount(self, parent=None):
-        return len(self.HEADERS)
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[section]
-        return None
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        row = self._data[index.row()]
-        column = index.column()
-        if column == 0:
-            return row["title"]
-        if column == 1:
-            return row["authors"]
-        if column == 2:
-            return str(row["rating"]) if row["rating"] else ""
-        if column == 3:
-            return row["linked"]
-        return None

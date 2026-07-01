@@ -1,6 +1,6 @@
 [project]
 name = "calibre-blog-rating-sync"
-version = "0.1.0"
+version = "0.3.0"
 description = "Calibre plugin to sync book ratings from blog reviews via JSON-LD structured data"
 requires-python = ">=3.8"
 dependencies = []
