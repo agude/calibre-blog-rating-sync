@@ -5,11 +5,16 @@ from urllib.request import Request, urlopen
 
 from qt.core import QObject, QThread, pyqtSignal
 
+try:
+    from calibre_plugins.blog_rating_sync.constants import PLUGIN_VERSION_STRING
+except ImportError:
+    from constants import PLUGIN_VERSION_STRING
+
 FETCH_TIMEOUT_SECONDS = 10
 REQUEST_DELAY_SECONDS = 0.5
 ALLOWED_SCHEMES = {"http", "https"}
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-USER_AGENT = "CalibreBlogRatingSync/0.4.0 (Calibre plugin; +https://alexgude.com)"
+USER_AGENT = f"CalibreBlogRatingSync/{PLUGIN_VERSION_STRING} (Calibre plugin; +https://alexgude.com)"
 FALLBACK_CHARSET = "utf-8"
 
 

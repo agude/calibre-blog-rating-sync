@@ -49,7 +49,7 @@ half stars (Calibre stores ratings as 0–10 internally).
 ## Installation
 
 ```sh
-make build
+just build
 ```
 
 Then in Calibre: **Preferences → Plugins → Load plugin from file** →
@@ -82,9 +82,14 @@ The toolbar button's menu has four actions:
 ## Development
 
 ```sh
-uv run pytest   # or: make test
-make build      # produce BlogRatingSync.zip
+just test        # run the test suite (uv run pytest)
+just build       # produce BlogRatingSync.zip
+just bump minor  # bump the version (major|minor|patch)
 ```
+
+The version lives in `plugin/constants.py` (`PLUGIN_VERSION`); the plugin
+metadata and user agent derive from it. `just bump` updates it and
+`pyproject.toml` together.
 
 Tests run without Calibre or Qt installed; `tests/conftest.py` stubs both
 and maps the `calibre_plugins.blog_rating_sync.*` imports to the real

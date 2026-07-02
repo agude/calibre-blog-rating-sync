@@ -41,11 +41,13 @@ for _module_name in [
 
 # Map the plugin's calibre_plugins imports to the real modules so cross-module
 # calls (e.g. sitemap -> network.fetch_bytes) hit real code under test.
+import constants  # noqa: E402
 import network  # noqa: E402
 import scraper  # noqa: E402
 import sitemap  # noqa: E402
 import sync  # noqa: E402
 
+sys.modules["calibre_plugins.blog_rating_sync.constants"] = constants
 sys.modules["calibre_plugins.blog_rating_sync.network"] = network
 sys.modules["calibre_plugins.blog_rating_sync.scraper"] = scraper
 sys.modules["calibre_plugins.blog_rating_sync.sitemap"] = sitemap
