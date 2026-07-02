@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from sitemap import fetch_book_urls
 
@@ -13,6 +13,7 @@ SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>https://alexgude.com/books/series/hyperion_cantos/</loc></url>
   <url><loc>https://alexgude.com/books/by-rating/</loc></url>
   <url><loc>https://alexgude.com/books/</loc></url>
+  <url><loc>https://alexgude.com/archive/books/sneaky/</loc></url>
 </urlset>"""
 
 PREFIXED_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -22,16 +23,8 @@ PREFIXED_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
 </sm:urlset>"""
 
 
-def _mock_urlopen(xml_content):
-    mock_response = MagicMock()
-    mock_response.read.return_value = xml_content.encode("utf-8")
-    mock_response.__enter__ = lambda self: self
-    mock_response.__exit__ = MagicMock(return_value=False)
-    return mock_response
-
-
 def test_fetch_book_urls():
-    with patch("sitemap.urlopen", return_value=_mock_urlopen(SAMPLE_SITEMAP)):
+    with patch("sitemap.fetch_bytes", return_value=SAMPLE_SITEMAP.encode("utf-8")):
         urls = fetch_book_urls("https://alexgude.com/sitemap.xml")
 
     assert "https://alexgude.com/books/hyperion/" in urls
@@ -41,10 +34,11 @@ def test_fetch_book_urls():
     assert "https://alexgude.com/books/authors/dan_simmons/" not in urls
     assert "https://alexgude.com/books/series/hyperion_cantos/" not in urls
     assert "https://alexgude.com/books/" not in urls
+    assert "https://alexgude.com/archive/books/sneaky/" not in urls
 
 
 def test_fetch_book_urls_with_namespace_prefix():
-    with patch("sitemap.urlopen", return_value=_mock_urlopen(PREFIXED_SITEMAP)):
+    with patch("sitemap.fetch_bytes", return_value=PREFIXED_SITEMAP.encode("utf-8")):
         urls = fetch_book_urls("https://alexgude.com/sitemap.xml")
 
     assert len(urls) == 2

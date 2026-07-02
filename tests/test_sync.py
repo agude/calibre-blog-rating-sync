@@ -10,6 +10,11 @@ REVIEW_HTML_RATING_3 = """<script type="application/ld+json">{
   "reviewRating": {"@type": "Rating", "ratingValue": "3"}
 }</script>"""
 
+REVIEW_HTML_RATING_3_5 = """<script type="application/ld+json">{
+  "@type": "Review",
+  "reviewRating": {"@type": "Rating", "ratingValue": "3.5"}
+}</script>"""
+
 
 class FakeDb:
     def __init__(self, books):
@@ -51,6 +56,21 @@ def test_apply_updates_rating():
     assert len(updated) == 1
     assert updated[0] == ("Hyperion", 3, 5)
     assert db._books[1]["rating"] == 10
+
+
+def test_apply_half_star_rating():
+    # Calibre stores half stars as odd values on its 0-10 scale.
+    db = FakeDb({
+        1: {"title": "Hyperion", "rating": 5},
+    })
+    linked = {1: ("Hyperion", "https://example.com/hyperion/")}
+    fetch_results = [("https://example.com/hyperion/", REVIEW_HTML_RATING_3_5, None)]
+
+    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+
+    assert updated[0] == ("Hyperion", 2.5, 3.5)
+    assert db._books[1]["rating"] == 7
+    assert isinstance(db._books[1]["rating"], int)
 
 
 def test_apply_skips_unchanged():

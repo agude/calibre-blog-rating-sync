@@ -16,8 +16,7 @@ class BlogRatingSyncAction(InterfaceAction):
         self.qaction.setMenu(menu)
         self.qaction.triggered.connect(self.sync_ratings)
 
-        self._sync_thread = None
-        self._sync_worker = None
+        self._sync_in_progress = False
 
     def _get_db(self):
         return self.gui.current_db.new_api
@@ -49,6 +48,10 @@ class BlogRatingSyncAction(InterfaceAction):
             collect_linked_books,
         )
 
+        if self._sync_in_progress:
+            info_dialog(self.gui, "Blog Rating Sync", "A sync is already running.", show=True)
+            return
+
         db = self._get_db()
         column = self._validate_column(db)
         if column is None:
@@ -69,18 +72,20 @@ class BlogRatingSyncAction(InterfaceAction):
             progress.setValue(index)
             progress.setLabelText(f"Fetching {index + 1}/{total}...")
 
-        def on_finished(fetch_results):
-            progress.setValue(len(urls))
+        def on_finished(fetch_results, was_cancelled):
+            self._sync_in_progress = False
+            progress.setValue(progress.maximum())
             updated, skipped, errors = apply_fetched_ratings(db, linked_books, fetch_results)
-            self._show_sync_results(updated, skipped, errors)
-            self._sync_thread = None
-            self._sync_worker = None
+            self._show_sync_results(updated, skipped, errors, was_cancelled)
 
-        self._sync_thread, self._sync_worker = start_batch_fetch(urls, on_progress, on_finished)
-        progress.canceled.connect(self._sync_worker.cancel)
+        self._sync_in_progress = True
+        _thread, worker = start_batch_fetch(urls, on_progress, on_finished, parent=self.gui)
+        progress.canceled.connect(worker.cancel)
 
-    def _show_sync_results(self, updated, skipped, errors):
+    def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):
         lines = []
+        if was_cancelled:
+            lines.append("Sync cancelled — showing partial results.\n")
         if updated:
             lines.append(f"Updated {len(updated)} rating(s):")
             for title, old_stars, new_stars in updated:
@@ -91,7 +96,7 @@ class BlogRatingSyncAction(InterfaceAction):
             lines.append(f"\nErrors ({len(errors)}):")
             for title, error_message in errors:
                 lines.append(f"  {title}: {error_message}")
-        if not updated and not errors:
+        if not updated and not errors and not was_cancelled:
             lines.append("All linked books already up to date.")
 
         info_dialog(self.gui, "Blog Rating Sync", "\n".join(lines), show=True)

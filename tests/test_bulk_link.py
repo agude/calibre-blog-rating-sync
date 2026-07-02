@@ -1,70 +1,38 @@
-import sys
 from unittest.mock import MagicMock
 
-# ---------------------------------------------------------------------------
-# Qt / calibre stubs — must be installed before importing bulk_link
-# ---------------------------------------------------------------------------
+from bulk_link import (
+    MatchCandidate,
+    ReviewMatch,
+    _BulkMatchModel,
+    _deselect_duplicate_selections,
+    _find_conflict_rows,
+)
+from qt.core import Qt
 
-class _FakeBase:
-    """Minimal stand-in for QAbstractTableModel and QStyledItemDelegate."""
-    def __init__(self):
-        self.dataChanged = MagicMock()
-
-    def index(self, row, col):
-        idx = MagicMock()
-        idx.row.return_value = row
-        idx.column.return_value = col
-        return idx
-
-
-_QT = MagicMock()
-_QT.Qt.ItemDataRole.UserRole = 256
-_QT.Qt.ItemDataRole.EditRole = 2
-_QT.Qt.ItemDataRole.DisplayRole = 0
-_QT.QAbstractTableModel = _FakeBase
-_QT.QStyledItemDelegate = _FakeBase
-
-for _mod in [
-    "qt",
-    "qt.core",
-    "calibre_plugins",
-    "calibre_plugins.blog_rating_sync",
-    "calibre_plugins.blog_rating_sync.config",
-    "calibre_plugins.blog_rating_sync.network",
-    "calibre_plugins.blog_rating_sync.sitemap",
-    "calibre_plugins.blog_rating_sync.sync",
-]:
-    sys.modules.setdefault(_mod, _QT)
-
-import scraper as _scraper_mod
-sys.modules["calibre_plugins.blog_rating_sync.scraper"] = _scraper_mod
-
-from bulk_link import _BulkMatchModel, _filter_mutual_best, _find_conflict_rows  # noqa: E402
-
-_EDIT_ROLE = _QT.Qt.ItemDataRole.EditRole
+_EDIT_ROLE = Qt.ItemDataRole.EditRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _candidate(calibre_id, score=0.9):
-    return {
-        "calibre_id": calibre_id,
-        "calibre_title": f"Title {calibre_id}",
-        "calibre_authors": "Author",
-        "score": score,
-    }
+    return MatchCandidate(
+        calibre_id=calibre_id,
+        calibre_title=f"Title {calibre_id}",
+        calibre_authors="Author",
+        score=score,
+    )
 
 
 def _match(url, candidates, selected_index=0):
-    return {
-        "blog_title": "Title",
-        "blog_authors": "Author",
-        "blog_rating": None,
-        "blog_url": url,
-        "candidates": candidates,
-        "selected_index": selected_index,
-    }
+    return ReviewMatch(
+        blog_title="Title",
+        blog_authors="Author",
+        blog_rating=None,
+        blog_url=url,
+        candidates=candidates,
+        selected_index=selected_index,
+    )
 
 
 def _model(rows):
@@ -80,50 +48,70 @@ def _index(model, row):
 
 
 # ---------------------------------------------------------------------------
-# _filter_mutual_best
+# _deselect_duplicate_selections
 # ---------------------------------------------------------------------------
 
-def test_filter_keeps_best_claimant_drops_weaker():
-    # url_a scores higher against book 1 than url_b does.
+def test_deselect_keeps_best_resets_weaker_without_dropping_rows():
+    # Both rows auto-selected book 1; only the higher score keeps it.
     matches = [
-        _match("url_a", [_candidate(1, 0.9)]),
-        _match("url_b", [_candidate(1, 0.6)]),
+        _match("url_a", [_candidate(1, 0.9)], selected_index=1),
+        _match("url_b", [_candidate(1, 0.6)], selected_index=1),
     ]
-    result = _filter_mutual_best(matches)
-    urls = {m["blog_url"] for m in result}
-    assert urls == {"url_a"}
+    _deselect_duplicate_selections(matches)
+    assert len(matches) == 2
+    assert matches[0].selected_index == 1
+    assert matches[1].selected_index == 0
 
 
-def test_filter_keeps_both_when_different_top_books():
-    # url_a wins book 1, url_b wins book 2 — both rows survive.
+def test_deselect_keeps_both_when_different_books():
     matches = [
-        _match("url_a", [_candidate(1, 0.9)]),
-        _match("url_b", [_candidate(2, 0.8)]),
+        _match("url_a", [_candidate(1, 0.9)], selected_index=1),
+        _match("url_b", [_candidate(2, 0.8)], selected_index=1),
     ]
-    result = _filter_mutual_best(matches)
-    urls = {m["blog_url"] for m in result}
-    assert urls == {"url_a", "url_b"}
+    _deselect_duplicate_selections(matches)
+    assert matches[0].selected_index == 1
+    assert matches[1].selected_index == 1
 
 
-def test_filter_three_urls_same_book_keeps_only_best():
+def test_deselect_three_rows_same_book_keeps_only_best():
     matches = [
-        _match("url_a", [_candidate(1, 0.9)]),
-        _match("url_b", [_candidate(1, 0.7)]),
-        _match("url_c", [_candidate(1, 0.5)]),
+        _match("url_a", [_candidate(1, 0.9)], selected_index=1),
+        _match("url_b", [_candidate(1, 0.7)], selected_index=1),
+        _match("url_c", [_candidate(1, 0.5)], selected_index=1),
     ]
-    result = _filter_mutual_best(matches)
-    assert len(result) == 1
-    assert result[0]["blog_url"] == "url_a"
+    _deselect_duplicate_selections(matches)
+    assert [m.selected_index for m in matches] == [1, 0, 0]
 
 
-def test_filter_url_that_wins_multiple_books_appears_once():
-    # url_a is top candidate for both books; it should appear only once.
+def test_deselect_tie_keeps_exactly_one():
     matches = [
-        _match("url_a", [_candidate(1, 0.9), _candidate(2, 0.8)]),
+        _match("url_a", [_candidate(1, 0.8)], selected_index=1),
+        _match("url_b", [_candidate(1, 0.8)], selected_index=1),
     ]
-    result = _filter_mutual_best(matches)
-    assert len(result) == 1
-    assert result[0]["blog_url"] == "url_a"
+    _deselect_duplicate_selections(matches)
+    assert sorted(m.selected_index for m in matches) == [0, 1]
+
+
+def test_deselect_ignores_skip_rows():
+    # Row 0 is Skip; row 1's selection of book 1 is unaffected.
+    matches = [
+        _match("url_a", [_candidate(1, 0.9)], selected_index=0),
+        _match("url_b", [_candidate(1, 0.6)], selected_index=1),
+    ]
+    _deselect_duplicate_selections(matches)
+    assert matches[0].selected_index == 0
+    assert matches[1].selected_index == 1
+
+
+def test_deselect_uses_selected_candidate_not_top():
+    # Row 1 selected its second candidate (book 2); no conflict with row 0.
+    matches = [
+        _match("url_a", [_candidate(1, 0.9)], selected_index=1),
+        _match("url_b", [_candidate(1, 0.8), _candidate(2, 0.7)], selected_index=2),
+    ]
+    _deselect_duplicate_selections(matches)
+    assert matches[0].selected_index == 1
+    assert matches[1].selected_index == 2
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +165,7 @@ def test_setdata_rejects_string_value():
     idx = _index(m, 0)
     result = m.setData(idx, "1", _EDIT_ROLE)
     assert result is False
-    assert data[0]["selected_index"] == 0
+    assert data[0].selected_index == 0
 
 
 def test_setdata_clears_all_conflicts_including_incoming_row():
@@ -189,9 +177,9 @@ def test_setdata_clears_all_conflicts_including_incoming_row():
     ]
     m = _model(data)
     m.setData(_index(m, 0), 1, _EDIT_ROLE)
-    assert data[0]["selected_index"] == 0
-    assert data[1]["selected_index"] == 0
-    assert data[2]["selected_index"] == 0
+    assert data[0].selected_index == 0
+    assert data[1].selected_index == 0
+    assert data[2].selected_index == 0
 
 
 def test_setdata_writes_value_when_no_conflict():
@@ -202,7 +190,7 @@ def test_setdata_writes_value_when_no_conflict():
     m = _model(data)
     result = m.setData(_index(m, 0), 1, _EDIT_ROLE)
     assert result is True
-    assert data[0]["selected_index"] == 1
+    assert data[0].selected_index == 1
 
 
 def test_setdata_skip_selection_always_writes():
@@ -212,4 +200,4 @@ def test_setdata_skip_selection_always_writes():
     m = _model(data)
     result = m.setData(_index(m, 0), 0, _EDIT_ROLE)
     assert result is True
-    assert data[0]["selected_index"] == 0
+    assert data[0].selected_index == 0

@@ -1,12 +1,13 @@
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+
+try:
+    from calibre_plugins.blog_rating_sync.network import fetch_bytes
+except ImportError:
+    from network import fetch_bytes
 
 SITEMAP_NAMESPACE = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-ALLOWED_SCHEMES = {"http", "https"}
-FETCH_TIMEOUT_SECONDS = 15
 MAX_SITEMAP_DEPTH = 3
-USER_AGENT = "CalibreBlogRatingSync/0.1 (Calibre plugin; +https://github.com)"
 
 
 def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
@@ -17,13 +18,7 @@ def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
     if _depth > MAX_SITEMAP_DEPTH:
         return []
 
-    parsed = urlparse(sitemap_url)
-    if parsed.scheme not in ALLOWED_SCHEMES:
-        raise ValueError(f"URL scheme '{parsed.scheme}' not allowed")
-
-    request = Request(sitemap_url, headers={"User-Agent": USER_AGENT})
-    response = urlopen(request, timeout=FETCH_TIMEOUT_SECONDS).read()
-    root = ET.fromstring(response)
+    root = ET.fromstring(fetch_bytes(sitemap_url))
 
     sub_sitemaps = root.findall(".//sm:sitemap/sm:loc", SITEMAP_NAMESPACE)
     if sub_sitemaps:
@@ -46,13 +41,11 @@ def _is_book_page(url, path_prefix):
 
     /books/hyperion/              -> True  (one slug after prefix)
     /books/authors/someone/       -> False (nested subdirectory)
-    /books/series/culture/        -> False (nested subdirectory)
     /books/                       -> False (index page, no slug)
+    /archive/books/hyperion/      -> False (prefix not at path start)
     """
     path = urlparse(url).path
-    idx = path.find(path_prefix)
-    if idx == -1:
+    if not path.startswith(path_prefix):
         return False
-    remainder = path[idx + len(path_prefix):]
-    slug = remainder.strip("/")
+    slug = path[len(path_prefix):].strip("/")
     return bool(slug) and "/" not in slug

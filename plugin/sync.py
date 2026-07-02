@@ -45,14 +45,20 @@ def apply_fetched_ratings(db, linked_books, fetch_results):
             continue
 
         current_calibre_rating = db.field_for("rating", book_id) or 0
-        new_calibre_rating = blog_rating * CALIBRE_STARS_MULTIPLIER
+        new_calibre_rating = int(blog_rating * CALIBRE_STARS_MULTIPLIER)
 
         if current_calibre_rating == new_calibre_rating:
             skipped.append(title)
             continue
 
         db.set_field("rating", {book_id: new_calibre_rating})
-        old_stars = current_calibre_rating // CALIBRE_STARS_MULTIPLIER
+        old_stars = _stars(current_calibre_rating)
         updated.append((title, old_stars, blog_rating))
 
     return updated, skipped, errors
+
+
+def _stars(calibre_rating):
+    """Convert Calibre's 0-10 rating to stars, as int when whole (e.g. 7 -> 3.5, 6 -> 3)."""
+    stars = calibre_rating / CALIBRE_STARS_MULTIPLIER
+    return int(stars) if stars.is_integer() else stars

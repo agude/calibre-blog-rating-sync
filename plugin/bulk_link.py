@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import List, Optional
+
 from calibre_plugins.blog_rating_sync.config import prefs
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
 from calibre_plugins.blog_rating_sync.scraper import (
@@ -30,9 +33,35 @@ TOP_N_CANDIDATES = 5
 SKIP_LABEL = "— Skip —"
 
 
+@dataclass
+class MatchCandidate:
+    calibre_id: int
+    calibre_title: str
+    calibre_authors: str
+    score: float
+
+    def display_label(self):
+        return f"{self.calibre_title} — {self.calibre_authors}"
+
+
+@dataclass
+class ReviewMatch:
+    blog_title: str
+    blog_authors: str
+    blog_rating: Optional[float]
+    blog_url: str
+    candidates: List[MatchCandidate]
+    selected_index: int  # 0 = Skip, otherwise 1-based index into candidates
+
+    def selected_candidate(self):
+        if self.selected_index == 0:
+            return None
+        return self.candidates[self.selected_index - 1]
+
+
 class _SitemapFetchThread(QThread):
-    def __init__(self, sitemap_url):
-        super().__init__()
+    def __init__(self, sitemap_url, parent=None):
+        super().__init__(parent)
         self._sitemap_url = sitemap_url
         self.urls = []
         self.error = None
@@ -44,31 +73,45 @@ class _SitemapFetchThread(QThread):
             self.error = str(error)
 
 
-def _filter_mutual_best(matches):
-    """Return only matches where the blog URL is the best claimant for its top Calibre book.
+def _deselect_duplicate_selections(matches):
+    """Reset duplicate selections so each Calibre book is selected at most once.
 
-    Prevents multiple blog posts from all mapping to the same Calibre book.
-    Each Calibre book can be the top candidate for at most one row.
+    When several blog reviews auto-select the same Calibre book, only the
+    highest-scoring one keeps its selection; the rest are reset to Skip. Rows
+    are never dropped — a deselected review stays visible so the user can pick
+    one of its other candidates.
     """
-    best_blog_for_calibre = {}  # calibre_id -> (score, blog_url)
+    best_score_for_book = {}
     for match in matches:
-        top = match["candidates"][0]
-        cid = top["calibre_id"]
-        score = top["score"]
-        if cid not in best_blog_for_calibre or score > best_blog_for_calibre[cid][0]:
-            best_blog_for_calibre[cid] = (score, match["blog_url"])
-    winning_urls = {url for _, url in best_blog_for_calibre.values()}
-    return [m for m in matches if m["blog_url"] in winning_urls]
+        candidate = match.selected_candidate()
+        if candidate is None:
+            continue
+        best_score_for_book[candidate.calibre_id] = max(
+            best_score_for_book.get(candidate.calibre_id, 0.0), candidate.score
+        )
+
+    claimed_book_ids = set()
+    for match in matches:
+        candidate = match.selected_candidate()
+        if candidate is None:
+            continue
+        is_best = candidate.score >= best_score_for_book[candidate.calibre_id]
+        if not is_best or candidate.calibre_id in claimed_book_ids:
+            match.selected_index = 0
+        else:
+            claimed_book_ids.add(candidate.calibre_id)
 
 
 def _find_conflict_rows(data, current_row, calibre_id):
-    """Return all row indices (excluding current_row) that have calibre_id selected."""
-    return [
-        row for row, match in enumerate(data)
-        if row != current_row
-        and match["selected_index"] > 0
-        and match["candidates"][match["selected_index"] - 1]["calibre_id"] == calibre_id
-    ]
+    """Return all row indices (excluding current_row) whose selected book is calibre_id."""
+    conflict_rows = []
+    for row, match in enumerate(data):
+        if row == current_row:
+            continue
+        candidate = match.selected_candidate()
+        if candidate is not None and candidate.calibre_id == calibre_id:
+            conflict_rows.append(row)
+    return conflict_rows
 
 
 class _CandidateComboDelegate(QStyledItemDelegate):
@@ -83,8 +126,7 @@ class _CandidateComboDelegate(QStyledItemDelegate):
             return combo
         combo.addItem(SKIP_LABEL, None)
         for candidate in candidates:
-            label = f"{candidate['calibre_title']} — {candidate['calibre_authors']} ({candidate['score']:.0%})"
-            combo.addItem(label, candidate)
+            combo.addItem(f"{candidate.display_label()} ({candidate.score:.0%})", candidate)
         selected = index.data(_BulkMatchModel.SELECTED_INDEX_ROLE)
         combo.setCurrentIndex(selected)
         # activated fires only on user interaction, not programmatic setCurrentIndex,
@@ -143,9 +185,19 @@ class BulkLinkDialog(QDialog):
         self._matches = []
         self._calibre_books = {}
         self._already_linked_urls = set()
+        self._progress = None
         self._sitemap_thread = None
-        self._fetch_thread = None
         self._fetch_worker = None
+        self._is_closed = False
+
+    def done(self, result):
+        # Closing mid-fetch: stop the batch worker (the parented thread cleans
+        # itself up, see start_batch_fetch) and make sure a still-running
+        # sitemap fetch does not start a new batch on this hidden dialog.
+        self._is_closed = True
+        if self._fetch_worker is not None:
+            self._fetch_worker.cancel()
+        super().done(result)
 
     def discover(self):
         base_url = prefs["blog_base_url"].rstrip("/")
@@ -165,13 +217,19 @@ class BulkLinkDialog(QDialog):
         self._calibre_books = calibre_books
         self._already_linked_urls = already_linked_urls
 
-        self._sitemap_thread = _SitemapFetchThread(sitemap_url)
+        # Parented to the main window so the thread survives this dialog
+        # closing mid-fetch; deleteLater cleans it up when done.
+        self._sitemap_thread = _SitemapFetchThread(sitemap_url, self.parent())
         self._sitemap_thread.finished.connect(self._on_sitemap_fetched)
+        self._sitemap_thread.finished.connect(self._sitemap_thread.deleteLater)
         self._sitemap_thread.start()
 
     def _on_sitemap_fetched(self):
         thread = self._sitemap_thread
         self._sitemap_thread = None
+
+        if self._is_closed:
+            return
 
         if thread.error:
             self.status_label.setText(f"Failed to fetch sitemap: {thread.error}")
@@ -194,16 +252,22 @@ class BulkLinkDialog(QDialog):
         self._progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._progress.show()
 
-        def on_progress(index, total, url):
-            self._progress.setValue(index)
-            self._progress.setLabelText(f"Fetching {index + 1}/{total}...")
-
-        self._fetch_thread, self._fetch_worker = start_batch_fetch(
-            unlinked_urls, on_progress, self._on_fetch_complete
+        _thread, self._fetch_worker = start_batch_fetch(
+            unlinked_urls,
+            self._on_fetch_progress,
+            self._on_fetch_complete,
+            parent=self.parent(),
         )
         self._progress.canceled.connect(self._fetch_worker.cancel)
 
-    def _on_fetch_complete(self, fetch_results):
+    def _on_fetch_progress(self, index, total, url):
+        self._progress.setValue(index)
+        self._progress.setLabelText(f"Fetching {index + 1}/{total}...")
+
+    def _on_fetch_complete(self, fetch_results, was_cancelled):
+        self._fetch_worker = None
+        if self._is_closed:
+            return
         self._progress.setValue(self._progress.maximum())
 
         matches = []
@@ -232,34 +296,35 @@ class BulkLinkDialog(QDialog):
                     blog_title, blog_authors, calibre_title, calibre_authors
                 )
                 if score >= MINIMUM_MATCH_SCORE:
-                    scored.append({
-                        "calibre_id": book_id,
-                        "calibre_title": calibre_title,
-                        "calibre_authors": ", ".join(calibre_authors),
-                        "score": score,
-                    })
+                    scored.append(MatchCandidate(
+                        calibre_id=book_id,
+                        calibre_title=calibre_title,
+                        calibre_authors=", ".join(calibre_authors),
+                        score=score,
+                    ))
 
-            scored.sort(key=lambda c: -c["score"])
+            scored.sort(key=lambda candidate: candidate.score, reverse=True)
             candidates = scored[:TOP_N_CANDIDATES]
 
             if not candidates:
                 continue
 
-            best = candidates[0]
-            selected_index = 1 if best["score"] >= AUTO_SELECT_THRESHOLD else 0
+            selected_index = 1 if candidates[0].score >= AUTO_SELECT_THRESHOLD else 0
 
-            matches.append({
-                "blog_title": blog_title,
-                "blog_authors": ", ".join(blog_authors),
-                "blog_rating": blog_rating,
-                "blog_url": url,
-                "candidates": candidates,
-                "selected_index": selected_index,
-            })
+            matches.append(ReviewMatch(
+                blog_title=blog_title,
+                blog_authors=", ".join(blog_authors),
+                blog_rating=blog_rating,
+                blog_url=url,
+                candidates=candidates,
+                selected_index=selected_index,
+            ))
 
-        matches = _filter_mutual_best(matches)
+        _deselect_duplicate_selections(matches)
 
-        self._matches = sorted(matches, key=lambda m: -m["candidates"][0]["score"])
+        self._matches = sorted(
+            matches, key=lambda match: match.candidates[0].score, reverse=True
+        )
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)
         for row in range(model.rowCount()):
@@ -270,6 +335,8 @@ class BulkLinkDialog(QDialog):
         self.link_button.setEnabled(bool(matches))
 
         summary_parts = [f"Found {len(matches)} potential match(es)."]
+        if was_cancelled:
+            summary_parts.insert(0, "Fetch cancelled — showing partial results.")
         if skipped_canonical_count:
             summary_parts.append(f"{skipped_canonical_count} old reviews skipped (have canonical).")
         if error_count:
@@ -277,17 +344,12 @@ class BulkLinkDialog(QDialog):
         summary_parts.append("Pick the correct Calibre book for each row, or set to Skip.")
         self.status_label.setText(" ".join(summary_parts))
 
-        self._fetch_thread = None
-        self._fetch_worker = None
-
     def _on_link_all(self):
         to_link = []
         for match in self._matches:
-            idx = match["selected_index"]
-            if idx == 0:
-                continue
-            candidate = match["candidates"][idx - 1]
-            to_link.append((match, candidate))
+            candidate = match.selected_candidate()
+            if candidate is not None:
+                to_link.append((match, candidate))
 
         if not to_link:
             return
@@ -304,12 +366,10 @@ class BulkLinkDialog(QDialog):
 
         rating_count = 0
         for match, candidate in to_link:
-            self.db.set_field(
-                self.column, {candidate["calibre_id"]: match["blog_url"]}
-            )
-            if match["blog_rating"] is not None:
-                new_rating = match["blog_rating"] * CALIBRE_STARS_MULTIPLIER
-                self.db.set_field("rating", {candidate["calibre_id"]: new_rating})
+            self.db.set_field(self.column, {candidate.calibre_id: match.blog_url})
+            if match.blog_rating is not None:
+                new_rating = int(match.blog_rating * CALIBRE_STARS_MULTIPLIER)
+                self.db.set_field("rating", {candidate.calibre_id: new_rating})
                 rating_count += 1
 
         self.linked_count = len(to_link)
@@ -359,36 +419,35 @@ class _BulkMatchModel(QAbstractTableModel):
         return base
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        row = self._data[index.row()]
+        match = self._data[index.row()]
         column = index.column()
 
         if column == self.COL_CALIBRE_MATCH:
             if role == self.CANDIDATES_ROLE:
-                return row["candidates"]
+                return match.candidates
             if role == self.SELECTED_INDEX_ROLE:
-                return row["selected_index"]
+                return match.selected_index
             if role == Qt.ItemDataRole.DisplayRole:
-                idx = row["selected_index"]
-                if idx == 0:
+                candidate = match.selected_candidate()
+                if candidate is None:
                     return SKIP_LABEL
-                candidate = row["candidates"][idx - 1]
-                return f"{candidate['calibre_title']} — {candidate['calibre_authors']}"
+                return candidate.display_label()
             return None
 
         if role != Qt.ItemDataRole.DisplayRole:
             return None
 
         if column == self.COL_BLOG_TITLE:
-            return row["blog_title"]
+            return match.blog_title
         if column == self.COL_BLOG_AUTHORS:
-            return row["blog_authors"]
+            return match.blog_authors
         if column == self.COL_RATING:
-            return str(row["blog_rating"]) if row["blog_rating"] else ""
+            return str(match.blog_rating) if match.blog_rating else ""
         if column == self.COL_SCORE:
-            idx = row["selected_index"]
-            if idx == 0:
+            candidate = match.selected_candidate()
+            if candidate is None:
                 return ""
-            return f"{row['candidates'][idx - 1]['score']:.0%}"
+            return f"{candidate.score:.0%}"
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
@@ -401,17 +460,17 @@ class _BulkMatchModel(QAbstractTableModel):
         current_row = index.row()
 
         if new_idx > 0:
-            target_id = self._data[current_row]["candidates"][new_idx - 1]["calibre_id"]
+            target_id = self._data[current_row].candidates[new_idx - 1].calibre_id
             conflict_rows = _find_conflict_rows(self._data, current_row, target_id)
             if conflict_rows:
                 for row in conflict_rows + [current_row]:
-                    self._data[row]["selected_index"] = 0
+                    self._data[row].selected_index = 0
                     self.dataChanged.emit(
                         self.index(row, self.COL_CALIBRE_MATCH),
                         self.index(row, self.COL_SCORE),
                     )
                 return True
 
-        self._data[current_row]["selected_index"] = new_idx
+        self._data[current_row].selected_index = new_idx
         self.dataChanged.emit(index, self.index(current_row, self.COL_SCORE))
         return True

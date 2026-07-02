@@ -20,8 +20,8 @@ class _FetchWorker(QThread):
     succeeded = pyqtSignal(str, str)
     failed = pyqtSignal(str)
 
-    def __init__(self, url):
-        super().__init__()
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
         self._url = url
 
     def run(self):
@@ -93,9 +93,14 @@ class LinkDialog(QDialog):
         self.fetch_button.setEnabled(False)
         self.link_button.setEnabled(False)
         self.status_label.setText("Fetching...")
-        self._fetch_thread = _FetchWorker(url)
+        # Parent the thread to the main window, not this dialog: the fetch
+        # cannot be interrupted, and the thread must survive the dialog
+        # closing mid-fetch. Signals to this dialog disconnect automatically
+        # if it is destroyed; deleteLater cleans the thread up when done.
+        self._fetch_thread = _FetchWorker(url, self.parent())
         self._fetch_thread.succeeded.connect(self._on_fetch_succeeded)
         self._fetch_thread.failed.connect(self._on_fetch_failed)
+        self._fetch_thread.finished.connect(self._fetch_thread.deleteLater)
         self._fetch_thread.start()
 
     def _on_fetch_failed(self, error_message):

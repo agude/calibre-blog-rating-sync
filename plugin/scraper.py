@@ -49,14 +49,29 @@ def find_canonical_url(html):
     return parse_html(html).canonical_url
 
 
+def _is_review(item):
+    """JSON-LD @type may be a single string or a list of types."""
+    declared_type = item.get("@type")
+    if isinstance(declared_type, list):
+        return "Review" in declared_type
+    return declared_type == "Review"
+
+
 def _iter_review_blocks(blocks):
-    """Yield Review-typed objects, unwrapping @graph containers."""
+    """Yield Review-typed objects, unwrapping top-level arrays and @graph containers."""
     for block in blocks:
-        if block.get("@type") == "Review":
-            yield block
-        for item in block.get("@graph", []):
-            if isinstance(item, dict) and item.get("@type") == "Review":
+        items = block if isinstance(block, list) else [block]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if _is_review(item):
                 yield item
+            graph = item.get("@graph")
+            if not isinstance(graph, list):
+                continue
+            for graph_item in graph:
+                if isinstance(graph_item, dict) and _is_review(graph_item):
+                    yield graph_item
 
 
 def extract_jsonld_blocks(html):
@@ -64,25 +79,32 @@ def extract_jsonld_blocks(html):
 
 
 def _normalize_rating(review_rating):
-    """Normalize a rating to a 1-5 scale using bestRating/worstRating."""
+    """Normalize a rating to the 1-5 scale using bestRating/worstRating.
+
+    Returns a multiple of 0.5 (as int when whole) — Calibre stores half stars.
+    """
+    if not isinstance(review_rating, dict):
+        return None
+
     raw = review_rating.get("ratingValue")
     if raw is None:
         return None
 
     try:
         value = float(raw)
+        best = float(review_rating.get("bestRating", TARGET_SCALE))
+        worst = float(review_rating.get("worstRating", 1))
     except (ValueError, TypeError):
         return None
-
-    best = float(review_rating.get("bestRating", TARGET_SCALE))
-    worst = float(review_rating.get("worstRating", 1))
 
     if best <= worst:
         return None
 
     normalized = (value - worst) / (best - worst) * (TARGET_SCALE - 1) + 1
-    clamped = max(1, min(TARGET_SCALE, normalized))
-    return int(math.floor(clamped + 0.5))
+    clamped = max(1.0, min(TARGET_SCALE, normalized))
+    # floor(x + 0.5) rounds half up; round() would round half to even.
+    half_stars = math.floor(clamped * 2 + 0.5) / 2
+    return int(half_stars) if half_stars.is_integer() else half_stars
 
 
 def extract_rating(html):
@@ -108,18 +130,25 @@ def extract_book_info(html):
 def extract_book_info_from_blocks(blocks):
     """Returns (title, authors_list) or (None, None) if not found."""
     for review in _iter_review_blocks(blocks):
-        item = review.get("itemReviewed", {})
+        item = review.get("itemReviewed")
+        if not isinstance(item, dict):
+            continue
         title = item.get("name")
-        author_data = item.get("author")
-        if author_data is None:
-            authors = []
-        elif isinstance(author_data, list):
-            authors = [a.get("name", "") for a in author_data]
-        else:
-            authors = [author_data.get("name", "")]
         if title:
-            return title, authors
+            return title, _author_names(item.get("author"))
     return None, None
+
+
+def _author_names(author_data):
+    """Extract names from schema.org author data: a string, an object, or a list of either."""
+    entries = author_data if isinstance(author_data, list) else [author_data]
+    names = []
+    for entry in entries:
+        if isinstance(entry, str):
+            names.append(entry)
+        elif isinstance(entry, dict):
+            names.append(entry.get("name", ""))
+    return names
 
 
 def _normalize_for_comparison(text):

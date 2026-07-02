@@ -57,18 +57,18 @@ def test_extract_rating_missing():
     assert extract_rating("<html><body>no json-ld</body></html>") is None
 
 
-def test_extract_rating_fractional_rounds_up():
+def test_extract_rating_preserves_half_stars():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "reviewRating": {"@type": "Rating", "ratingValue": "4.5"}
     }</script>"""
-    assert extract_rating(html) == 5
+    assert extract_rating(html) == 4.5
 
 
-def test_extract_rating_fractional_rounds_down():
+def test_extract_rating_rounds_to_nearest_half_star():
     html = """<script type="application/ld+json">{
       "@type": "Review",
-      "reviewRating": {"@type": "Rating", "ratingValue": "4.4"}
+      "reviewRating": {"@type": "Rating", "ratingValue": "4.2"}
     }</script>"""
     assert extract_rating(html) == 4
 
@@ -166,3 +166,72 @@ def test_extract_rating_non_review_jsonld_ignored():
       "reviewRating": {"@type": "Rating", "ratingValue": "3"}
     }</script>"""
     assert extract_rating(html) == 3
+
+
+# ---------------------------------------------------------------------------
+# Malformed / non-canonical JSON-LD shapes must not crash extraction
+# ---------------------------------------------------------------------------
+
+def test_extract_rating_top_level_array():
+    html = """<script type="application/ld+json">[
+      {"@type": "WebPage", "name": "page"},
+      {"@type": "Review", "reviewRating": {"ratingValue": "4"}}
+    ]</script>"""
+    assert extract_rating(html) == 4
+
+
+def test_extract_rating_type_list():
+    html = """<script type="application/ld+json">{
+      "@type": ["Review", "CreativeWork"],
+      "reviewRating": {"ratingValue": "4"}
+    }</script>"""
+    assert extract_rating(html) == 4
+
+
+def test_extract_rating_scalar_block_ignored():
+    html = """<script type="application/ld+json">"just a string"</script>"""
+    assert extract_rating(html) is None
+
+
+def test_normalize_rating_non_numeric_best_rating():
+    assert _normalize_rating({"ratingValue": "4", "bestRating": "five"}) is None
+
+
+def test_normalize_rating_non_dict():
+    assert _normalize_rating("4 stars") is None
+
+
+def test_extract_book_info_string_author():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {"@type": "Book", "name": "Dune", "author": "Frank Herbert"}
+    }</script>"""
+    assert extract_book_info(html) == ("Dune", ["Frank Herbert"])
+
+
+def test_extract_book_info_mixed_author_list():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {
+        "@type": "Book",
+        "name": "Good Omens",
+        "author": ["Terry Pratchett", {"@type": "Person", "name": "Neil Gaiman"}]
+      }
+    }</script>"""
+    assert extract_book_info(html) == ("Good Omens", ["Terry Pratchett", "Neil Gaiman"])
+
+
+def test_extract_book_info_item_reviewed_string():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": "Dune"
+    }</script>"""
+    assert extract_book_info(html) == (None, None)
+
+
+def test_extract_book_info_no_author():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {"@type": "Book", "name": "Anonymous Work"}
+    }</script>"""
+    assert extract_book_info(html) == ("Anonymous Work", [])
