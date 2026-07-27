@@ -172,6 +172,7 @@ def test_extract_rating_non_review_jsonld_ignored():
 # Malformed / non-canonical JSON-LD shapes must not crash extraction
 # ---------------------------------------------------------------------------
 
+
 def test_extract_rating_top_level_array():
     html = """<script type="application/ld+json">[
       {"@type": "WebPage", "name": "page"},

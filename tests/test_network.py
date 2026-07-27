@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from network import fetch_page, validate_url
 
 
@@ -44,12 +43,12 @@ def test_fetch_page_uses_declared_charset():
 
 
 def test_fetch_page_defaults_to_utf8():
-    body = "café".encode("utf-8")
+    body = "café".encode()
     with patch("network.urlopen", return_value=_mock_response(body, None)):
         assert fetch_page("https://example.com/") == "café"
 
 
 def test_fetch_page_unknown_charset_falls_back_to_utf8():
-    body = "café".encode("utf-8")
+    body = "café".encode()
     with patch("network.urlopen", return_value=_mock_response(body, "bogus-charset")):
         assert fetch_page("https://example.com/") == "café"

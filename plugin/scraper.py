@@ -1,3 +1,4 @@
+import contextlib
 import json
 import math
 from difflib import SequenceMatcher
@@ -33,10 +34,8 @@ class _JsonLdExtractor(HTMLParser):
         if tag == "script" and self._in_jsonld:
             self._in_jsonld = False
             raw = "".join(self._current_data)
-            try:
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
                 self.jsonld_blocks.append(json.loads(raw))
-            except (json.JSONDecodeError, ValueError):
-                pass
 
 
 def parse_html(html):
@@ -182,10 +181,7 @@ def _author_similarity(authors_a, authors_b):
 
     total = 0.0
     for author_a in authors_a:
-        best = max(
-            _single_author_similarity(author_a, author_b)
-            for author_b in authors_b
-        )
+        best = max(_single_author_similarity(author_a, author_b) for author_b in authors_b)
         total += best
     return total / len(authors_a)
 

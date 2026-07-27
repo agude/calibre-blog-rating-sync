@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin"))
 # modules regardless of collection order.
 # ---------------------------------------------------------------------------
 
+
 class _FakeQtBase:
     """Minimal stand-in for QAbstractTableModel and QStyledItemDelegate."""
 

@@ -60,35 +60,45 @@ def test_completely_different_titles():
 
 def test_similar_titles_different_authors_rejected():
     score = match_score(
-        "The Three-Body Problem", ["Liu Cixin"],
-        "The Three-Body Problem", ["Someone Else"],
+        "The Three-Body Problem",
+        ["Liu Cixin"],
+        "The Three-Body Problem",
+        ["Someone Else"],
     )
     assert score == 0.0
 
 
 def test_perfect_match_is_one():
     score = match_score(
-        "A Canticle for Leibowitz", ["Walter M. Miller Jr."],
-        "A Canticle for Leibowitz", ["Walter M. Miller Jr."],
+        "A Canticle for Leibowitz",
+        ["Walter M. Miller Jr."],
+        "A Canticle for Leibowitz",
+        ["Walter M. Miller Jr."],
     )
     assert score == 1.0
 
 
 def test_coauthors_different_order():
     score = match_score(
-        "Good Omens", ["Terry Pratchett", "Neil Gaiman"],
-        "Good Omens", ["Neil Gaiman", "Terry Pratchett"],
+        "Good Omens",
+        ["Terry Pratchett", "Neil Gaiman"],
+        "Good Omens",
+        ["Neil Gaiman", "Terry Pratchett"],
     )
     assert score > 0.9
 
 
 def test_coauthors_same_order():
     same_order = match_score(
-        "Good Omens", ["Terry Pratchett", "Neil Gaiman"],
-        "Good Omens", ["Terry Pratchett", "Neil Gaiman"],
+        "Good Omens",
+        ["Terry Pratchett", "Neil Gaiman"],
+        "Good Omens",
+        ["Terry Pratchett", "Neil Gaiman"],
     )
     diff_order = match_score(
-        "Good Omens", ["Terry Pratchett", "Neil Gaiman"],
-        "Good Omens", ["Neil Gaiman", "Terry Pratchett"],
+        "Good Omens",
+        ["Terry Pratchett", "Neil Gaiman"],
+        "Good Omens",
+        ["Neil Gaiman", "Terry Pratchett"],
     )
     assert abs(same_order - diff_order) < 0.15

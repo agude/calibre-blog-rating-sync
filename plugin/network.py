@@ -14,7 +14,9 @@ FETCH_TIMEOUT_SECONDS = 10
 REQUEST_DELAY_SECONDS = 0.5
 ALLOWED_SCHEMES = {"http", "https"}
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-USER_AGENT = f"CalibreBlogRatingSync/{PLUGIN_VERSION_STRING} (Calibre plugin; +https://alexgude.com)"
+USER_AGENT = (
+    f"CalibreBlogRatingSync/{PLUGIN_VERSION_STRING} (Calibre plugin; +https://alexgude.com)"
+)
 FALLBACK_CHARSET = "utf-8"
 
 

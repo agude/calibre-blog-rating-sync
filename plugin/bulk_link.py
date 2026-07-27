@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from calibre_plugins.blog_rating_sync.config import prefs
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
@@ -21,10 +21,10 @@ from qt.core import (
     QProgressDialog,
     QPushButton,
     QStyledItemDelegate,
+    Qt,
     QTableView,
     QThread,
     QVBoxLayout,
-    Qt,
 )
 
 AUTO_SELECT_THRESHOLD = 0.7
@@ -131,9 +131,7 @@ class _CandidateComboDelegate(QStyledItemDelegate):
         combo.setCurrentIndex(selected)
         # activated fires only on user interaction, not programmatic setCurrentIndex,
         # so this won't loop when setEditorData syncs the combo after dataChanged.
-        combo.activated.connect(
-            lambda i: index.model().setData(index, i, Qt.ItemDataRole.EditRole)
-        )
+        combo.activated.connect(lambda i: index.model().setData(index, i, Qt.ItemDataRole.EditRole))
         return combo
 
     def setEditorData(self, editor, index):
@@ -236,14 +234,11 @@ class BulkLinkDialog(QDialog):
             return
 
         unlinked_urls = [
-            url for url in thread.urls
-            if url.rstrip("/") not in self._already_linked_urls
+            url for url in thread.urls if url.rstrip("/") not in self._already_linked_urls
         ]
 
         if not unlinked_urls:
-            self.status_label.setText(
-                f"All {len(thread.urls)} blog reviews are already linked."
-            )
+            self.status_label.setText(f"All {len(thread.urls)} blog reviews are already linked.")
             return
 
         self._progress = QProgressDialog(
@@ -292,16 +287,16 @@ class BulkLinkDialog(QDialog):
 
             scored = []
             for book_id, (calibre_title, calibre_authors) in self._calibre_books.items():
-                score = match_score(
-                    blog_title, blog_authors, calibre_title, calibre_authors
-                )
+                score = match_score(blog_title, blog_authors, calibre_title, calibre_authors)
                 if score >= MINIMUM_MATCH_SCORE:
-                    scored.append(MatchCandidate(
-                        calibre_id=book_id,
-                        calibre_title=calibre_title,
-                        calibre_authors=", ".join(calibre_authors),
-                        score=score,
-                    ))
+                    scored.append(
+                        MatchCandidate(
+                            calibre_id=book_id,
+                            calibre_title=calibre_title,
+                            calibre_authors=", ".join(calibre_authors),
+                            score=score,
+                        )
+                    )
 
             scored.sort(key=lambda candidate: candidate.score, reverse=True)
             candidates = scored[:TOP_N_CANDIDATES]
@@ -311,26 +306,24 @@ class BulkLinkDialog(QDialog):
 
             selected_index = 1 if candidates[0].score >= AUTO_SELECT_THRESHOLD else 0
 
-            matches.append(ReviewMatch(
-                blog_title=blog_title,
-                blog_authors=", ".join(blog_authors),
-                blog_rating=blog_rating,
-                blog_url=url,
-                candidates=candidates,
-                selected_index=selected_index,
-            ))
+            matches.append(
+                ReviewMatch(
+                    blog_title=blog_title,
+                    blog_authors=", ".join(blog_authors),
+                    blog_rating=blog_rating,
+                    blog_url=url,
+                    candidates=candidates,
+                    selected_index=selected_index,
+                )
+            )
 
         _deselect_duplicate_selections(matches)
 
-        self._matches = sorted(
-            matches, key=lambda match: match.candidates[0].score, reverse=True
-        )
+        self._matches = sorted(matches, key=lambda match: match.candidates[0].score, reverse=True)
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)
         for row in range(model.rowCount()):
-            self.table.openPersistentEditor(
-                model.index(row, _BulkMatchModel.COL_CALIBRE_MATCH)
-            )
+            self.table.openPersistentEditor(model.index(row, _BulkMatchModel.COL_CALIBRE_MATCH))
         self.table.resizeColumnsToContents()
         self.link_button.setEnabled(bool(matches))
 
@@ -380,7 +373,7 @@ class BulkLinkDialog(QDialog):
 
 
 class _BulkMatchModel(QAbstractTableModel):
-    HEADERS = [
+    HEADERS: ClassVar = [
         "Blog Title",
         "Blog Authors",
         "Rating",
@@ -463,7 +456,7 @@ class _BulkMatchModel(QAbstractTableModel):
             target_id = self._data[current_row].candidates[new_idx - 1].calibre_id
             conflict_rows = _find_conflict_rows(self._data, current_row, target_id)
             if conflict_rows:
-                for row in conflict_rows + [current_row]:
+                for row in [*conflict_rows, current_row]:
                     self._data[row].selected_index = 0
                     self.dataChanged.emit(
                         self.index(row, self.COL_CALIBRE_MATCH),

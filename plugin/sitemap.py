@@ -28,11 +28,7 @@ def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
                 urls.extend(fetch_book_urls(loc.text, path_prefix, _depth + 1))
         return urls
 
-    all_urls = [
-        loc.text
-        for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE)
-        if loc.text
-    ]
+    all_urls = [loc.text for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE) if loc.text]
     return [url for url in all_urls if _is_book_page(url, path_prefix)]
 
 
@@ -47,5 +43,5 @@ def _is_book_page(url, path_prefix):
     path = urlparse(url).path
     if not path.startswith(path_prefix):
         return False
-    slug = path[len(path_prefix):].strip("/")
+    slug = path[len(path_prefix) :].strip("/")
     return bool(slug) and "/" not in slug

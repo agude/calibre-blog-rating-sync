@@ -12,6 +12,16 @@ build:
 test:
     uv run pytest
 
+# Lint and check formatting
+lint:
+    uv run ruff check plugin/ tests/
+    uv run ruff format --check plugin/ tests/
+
+# Format code and apply safe lint fixes
+fmt:
+    uv run ruff format plugin/ tests/
+    uv run ruff check --fix plugin/ tests/
+
 # Remove build artifacts
 clean:
     rm -f {{plugin_name}}

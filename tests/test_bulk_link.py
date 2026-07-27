@@ -15,6 +15,7 @@ _EDIT_ROLE = Qt.ItemDataRole.EditRole
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _candidate(calibre_id, score=0.9):
     return MatchCandidate(
         calibre_id=calibre_id,
@@ -50,6 +51,7 @@ def _index(model, row):
 # ---------------------------------------------------------------------------
 # _deselect_duplicate_selections
 # ---------------------------------------------------------------------------
+
 
 def test_deselect_keeps_best_resets_weaker_without_dropping_rows():
     # Both rows auto-selected book 1; only the higher score keeps it.
@@ -118,6 +120,7 @@ def test_deselect_uses_selected_candidate_not_top():
 # _find_conflict_rows
 # ---------------------------------------------------------------------------
 
+
 def test_no_conflicts_when_books_differ():
     data = [
         _match("url_a", [_candidate(1)], selected_index=1),
@@ -157,6 +160,7 @@ def test_skip_rows_not_counted_as_conflicts():
 # ---------------------------------------------------------------------------
 # _BulkMatchModel.setData
 # ---------------------------------------------------------------------------
+
 
 def test_setdata_rejects_string_value():
     # The base-class setModelData bug passed a str; setData must reject it.

@@ -33,11 +33,13 @@ class FakeDb:
 
 
 def test_collect_linked_books():
-    db = FakeDb({
-        1: {"title": "Hyperion", "#blog_url": "https://example.com/hyperion/"},
-        2: {"title": "Blindsight", "#blog_url": None},
-        3: {"title": "Accelerando", "#blog_url": "https://example.com/accelerando/"},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "#blog_url": "https://example.com/hyperion/"},
+            2: {"title": "Blindsight", "#blog_url": None},
+            3: {"title": "Accelerando", "#blog_url": "https://example.com/accelerando/"},
+        }
+    )
     linked = collect_linked_books(db, "#blog_url")
     assert len(linked) == 2
     assert linked[1] == ("Hyperion", "https://example.com/hyperion/")
@@ -45,13 +47,15 @@ def test_collect_linked_books():
 
 
 def test_apply_updates_rating():
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 6},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+        }
+    )
     linked = {1: ("Hyperion", "https://example.com/hyperion/")}
     fetch_results = [("https://example.com/hyperion/", REVIEW_HTML, None)]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    updated, _skipped, _errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert len(updated) == 1
     assert updated[0] == ("Hyperion", 3, 5)
@@ -60,13 +64,15 @@ def test_apply_updates_rating():
 
 def test_apply_half_star_rating():
     # Calibre stores half stars as odd values on its 0-10 scale.
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 5},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 5},
+        }
+    )
     linked = {1: ("Hyperion", "https://example.com/hyperion/")}
     fetch_results = [("https://example.com/hyperion/", REVIEW_HTML_RATING_3_5, None)]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    updated, _skipped, _errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert updated[0] == ("Hyperion", 2.5, 3.5)
     assert db._books[1]["rating"] == 7
@@ -74,49 +80,57 @@ def test_apply_half_star_rating():
 
 
 def test_apply_skips_unchanged():
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 10},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 10},
+        }
+    )
     linked = {1: ("Hyperion", "https://example.com/hyperion/")}
     fetch_results = [("https://example.com/hyperion/", REVIEW_HTML, None)]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    updated, skipped, _errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert len(updated) == 0
     assert len(skipped) == 1
 
 
 def test_apply_reports_fetch_error():
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 6},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+        }
+    )
     linked = {1: ("Hyperion", "https://example.com/hyperion/")}
     fetch_results = [("https://example.com/hyperion/", None, "404 Not Found")]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    _updated, _skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert len(errors) == 1
     assert errors[0] == ("Hyperion", "404 Not Found")
 
 
 def test_apply_reports_missing_jsonld():
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 6},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+        }
+    )
     linked = {1: ("Hyperion", "https://example.com/hyperion/")}
     fetch_results = [("https://example.com/hyperion/", "<html></html>", None)]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    _updated, _skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert len(errors) == 1
     assert "No rating" in errors[0][1]
 
 
 def test_apply_multiple_books():
-    db = FakeDb({
-        1: {"title": "Hyperion", "rating": 6},
-        2: {"title": "Accelerando", "rating": 4},
-    })
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+            2: {"title": "Accelerando", "rating": 4},
+        }
+    )
     linked = {
         1: ("Hyperion", "https://example.com/hyperion/"),
         2: ("Accelerando", "https://example.com/accelerando/"),
@@ -126,7 +140,7 @@ def test_apply_multiple_books():
         ("https://example.com/accelerando/", REVIEW_HTML_RATING_3, None),
     ]
 
-    updated, skipped, errors = apply_fetched_ratings(db, linked, fetch_results)
+    updated, _skipped, _errors = apply_fetched_ratings(db, linked, fetch_results)
 
     assert len(updated) == 2
     assert db._books[1]["rating"] == 10

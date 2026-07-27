@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import pytest
 from sitemap import fetch_book_urls
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -47,8 +48,5 @@ def test_fetch_book_urls_with_namespace_prefix():
 
 
 def test_rejects_file_scheme():
-    try:
+    with pytest.raises(ValueError, match="not allowed"):
         fetch_book_urls("file:///etc/passwd")
-        assert False, "Should have raised ValueError"
-    except ValueError as error:
-        assert "not allowed" in str(error)

@@ -113,8 +113,7 @@ class LinkDialog(QDialog):
         canonical = find_canonical_url(html)
         if canonical and canonical.rstrip("/") != url.rstrip("/"):
             self.status_label.setText(
-                f"This is an old review. Canonical URL: {canonical}\n"
-                f"Use the canonical URL instead."
+                f"This is an old review. Canonical URL: {canonical}\nUse the canonical URL instead."
             )
             return
 
@@ -126,9 +125,7 @@ class LinkDialog(QDialog):
 
         author_string = ", ".join(blog_authors) if blog_authors else "Unknown"
         rating_string = f" (rating: {blog_rating})" if blog_rating else ""
-        self.status_label.setText(
-            f'Review found: "{blog_title}" by {author_string}{rating_string}'
-        )
+        self.status_label.setText(f'Review found: "{blog_title}" by {author_string}{rating_string}')
 
         self._fetched_url = url
         self.link_button.setEnabled(True)
