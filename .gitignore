@@ -2,4 +2,3 @@ __pycache__/
 *.pyc
 *.zip
 .venv/
-uv.lock

@@ -8,9 +8,13 @@ default:
 build:
     cd plugin && zip -r ../{{plugin_name}} . -x '*__pycache__*' '*.pyc'
 
+# Install dependencies
+sync:
+    uv sync --dev
+
 # Run the test suite
-test:
-    uv run pytest
+test *args:
+    uv run pytest {{ args }}
 
 # Lint and check formatting
 lint:
@@ -18,9 +22,21 @@ lint:
     uv run ruff format --check plugin/ tests/
 
 # Format code and apply safe lint fixes
-fmt:
+format:
     uv run ruff format plugin/ tests/
     uv run ruff check --fix plugin/ tests/
+
+# Everything CI runs
+# No type-check: the plugin imports calibre and qt at runtime, neither of
+# which is installable from PyPI, so mypy cannot resolve them here.
+check: lint test
+
+# Install the pre-commit hook into this clone
+hooks-install:
+    @mkdir -p .git/hooks
+    @cp bin/pre-commit.sh .git/hooks/pre-commit
+    @chmod +x .git/hooks/pre-commit
+    @echo "Pre-commit hook installed."
 
 # Remove build artifacts
 clean:
