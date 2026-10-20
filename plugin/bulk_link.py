@@ -2,20 +2,12 @@ from typing import ClassVar
 
 from calibre_plugins.blog_rating_sync.config import prefs
 from calibre_plugins.blog_rating_sync.matching import (
-    AUTO_SELECT_THRESHOLD,
-    MINIMUM_MATCH_SCORE,
-    TOP_N_CANDIDATES,
-    MatchCandidate,
-    ReviewMatch,
-    deselect_duplicate_selections,
+    build_review_matches,
     find_conflict_rows,
+    selected_links,
 )
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
-from calibre_plugins.blog_rating_sync.scraper import (
-    match_score,
-    normalize_url,
-    parse_review_page,
-)
+from calibre_plugins.blog_rating_sync.scraper import normalize_url
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 from calibre_plugins.blog_rating_sync.sync import apply_links
 from qt.core import (
@@ -208,59 +200,8 @@ class BulkLinkDialog(QDialog):
             return
         self._progress.setValue(self._progress.maximum())
 
-        matches = []
-        skipped_canonical_count = 0
-        error_count = 0
-
-        for url, html, fetch_error in fetch_results:
-            if fetch_error:
-                error_count += 1
-                continue
-
-            page = parse_review_page(url, html)
-            if page.is_outdated:
-                skipped_canonical_count += 1
-                continue
-
-            if not page.title:
-                error_count += 1
-                continue
-
-            scored = []
-            for book_id, (calibre_title, calibre_authors) in self._calibre_books.items():
-                score = match_score(page.title, page.authors, calibre_title, calibre_authors)
-                if score >= MINIMUM_MATCH_SCORE:
-                    scored.append(
-                        MatchCandidate(
-                            calibre_id=book_id,
-                            calibre_title=calibre_title,
-                            calibre_authors=", ".join(calibre_authors),
-                            score=score,
-                        )
-                    )
-
-            scored.sort(key=lambda candidate: candidate.score, reverse=True)
-            candidates = scored[:TOP_N_CANDIDATES]
-
-            if not candidates:
-                continue
-
-            selected_index = 1 if candidates[0].score >= AUTO_SELECT_THRESHOLD else 0
-
-            matches.append(
-                ReviewMatch(
-                    blog_title=page.title,
-                    blog_authors=", ".join(page.authors),
-                    blog_rating=page.rating,
-                    blog_url=url,
-                    candidates=candidates,
-                    selected_index=selected_index,
-                )
-            )
-
-        deselect_duplicate_selections(matches)
-
-        self._matches = sorted(matches, key=lambda match: match.candidates[0].score, reverse=True)
+        matches, stats = build_review_matches(fetch_results, self._calibre_books)
+        self._matches = matches
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)
         for row in range(model.rowCount()):
@@ -271,42 +212,35 @@ class BulkLinkDialog(QDialog):
         summary_parts = [f"Found {len(matches)} potential match(es)."]
         if was_cancelled:
             summary_parts.insert(0, "Fetch cancelled — showing partial results.")
-        if skipped_canonical_count:
-            summary_parts.append(f"{skipped_canonical_count} old reviews skipped (have canonical).")
-        if error_count:
-            summary_parts.append(f"{error_count} URL(s) failed to fetch.")
+        if stats.outdated:
+            summary_parts.append(f"{stats.outdated} old reviews skipped (have canonical).")
+        if stats.errors:
+            summary_parts.append(f"{stats.errors} URL(s) failed to fetch.")
+        if stats.no_candidates:
+            summary_parts.append(f"{stats.no_candidates} review(s) had no matching book.")
         if self._sitemap_failure_count:
             summary_parts.append(f"{self._sitemap_failure_count} sitemap(s) failed to load.")
         summary_parts.append("Pick the correct Calibre book for each row, or set to Skip.")
         self.status_label.setText(" ".join(summary_parts))
 
     def _on_link_all(self):
-        to_link = []
-        for match in self._matches:
-            candidate = match.selected_candidate()
-            if candidate is not None:
-                to_link.append((match, candidate))
-
-        if not to_link:
+        links = selected_links(self._matches)
+        if not links:
             return
 
         reply = QMessageBox.question(
             self,
             "Confirm Bulk Link",
-            f"Link {len(to_link)} book(s) and update their ratings?",
+            f"Link {len(links)} book(s) and update their ratings?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        links = [
-            (candidate.calibre_id, match.blog_url, match.blog_rating)
-            for match, candidate in to_link
-        ]
         rating_count = apply_links(self.db, self.column, links)
 
-        self.linked_count = len(to_link)
+        self.linked_count = len(links)
         self.status_label.setText(
             f"Linked {self.linked_count} book(s), updated {rating_count} rating(s)."
         )
