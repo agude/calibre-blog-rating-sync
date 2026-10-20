@@ -236,3 +236,71 @@ def test_extract_book_info_no_author():
       "itemReviewed": {"@type": "Book", "name": "Anonymous Work"}
     }</script>"""
     assert extract_book_info(html) == ("Anonymous Work", [])
+
+
+def test_extract_book_info_nameless_author_object():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {
+        "@type": "Book",
+        "name": "Anonymous Work",
+        "author": {"@type": "Person"}
+      }
+    }</script>"""
+    assert extract_book_info(html) == ("Anonymous Work", [])
+
+
+def test_extract_book_info_whitespace_author_dropped():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {
+        "@type": "Book",
+        "name": "Good Omens",
+        "author": [
+          "   ",
+          {"@type": "Person", "name": ""},
+          {"@type": "Person", "name": "  Neil Gaiman  "}
+        ]
+      }
+    }</script>"""
+    assert extract_book_info(html) == ("Good Omens", ["Neil Gaiman"])
+
+
+def test_normalize_rating_rejects_nan():
+    assert _normalize_rating({"ratingValue": "NaN"}) is None
+
+
+def test_normalize_rating_rejects_inf():
+    assert _normalize_rating({"ratingValue": "inf"}) is None
+
+
+def test_normalize_rating_rejects_negative_inf():
+    assert _normalize_rating({"ratingValue": "-inf"}) is None
+
+
+def test_normalize_rating_rejects_non_finite_best_rating():
+    assert _normalize_rating({"ratingValue": "4", "bestRating": "inf", "worstRating": "1"}) is None
+    assert _normalize_rating({"ratingValue": "4", "bestRating": "5", "worstRating": "-inf"}) is None
+    assert _normalize_rating({"ratingValue": "4", "bestRating": "nan", "worstRating": "1"}) is None
+
+
+def test_extract_rating_nan_literal_in_json():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "reviewRating": {"@type": "Rating", "ratingValue": NaN}
+    }</script>"""
+    assert extract_rating(html) is None
+
+
+def test_extract_jsonld_blocks_survives_deep_nesting():
+    html = '<script type="application/ld+json">' + "[" * 10000 + "]" * 10000 + "</script>"
+    assert isinstance(extract_jsonld_blocks(html), list)
+
+
+def test_normalize_rating_rejects_huge_integer():
+    assert _normalize_rating({"ratingValue": 10**400}) is None
+    html = (
+        '<script type="application/ld+json">{"@type": "Review", "reviewRating": '
+        f'{{"ratingValue": {"9" * 400}}}}}</script>'
+    )
+    assert extract_rating(html) is None

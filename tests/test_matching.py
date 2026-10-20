@@ -1,4 +1,4 @@
-from calibre_plugins.blog_rating_sync.scraper import match_score
+from calibre_plugins.blog_rating_sync.scraper import extract_book_info, match_score
 
 
 def test_exact_title_and_author():
@@ -102,3 +102,17 @@ def test_coauthors_same_order():
         ["Neil Gaiman", "Terry Pratchett"],
     )
     assert abs(same_order - diff_order) < 0.15
+
+
+def test_nameless_author_review_scores_on_title_alone():
+    html = """<script type="application/ld+json">{
+      "@type": "Review",
+      "itemReviewed": {
+        "@type": "Book",
+        "name": "Anonymous Work",
+        "author": {"@type": "Person"}
+      }
+    }</script>"""
+    title, authors = extract_book_info(html)
+    score = match_score(title, authors, "Anonymous Work", ["Some Author"])
+    assert score == 0.5

@@ -34,7 +34,7 @@ class _JsonLdExtractor(HTMLParser):
         if tag == "script" and self._in_jsonld:
             self._in_jsonld = False
             raw = "".join(self._current_data)
-            with contextlib.suppress(json.JSONDecodeError, ValueError):
+            with contextlib.suppress(ValueError, RecursionError):
                 self.jsonld_blocks.append(json.loads(raw))
 
 
@@ -93,7 +93,10 @@ def _normalize_rating(review_rating):
         value = float(raw)
         best = float(review_rating.get("bestRating", TARGET_SCALE))
         worst = float(review_rating.get("worstRating", 1))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+    if not all(math.isfinite(number) for number in (value, best, worst)):
         return None
 
     if best <= worst:
@@ -143,10 +146,9 @@ def _author_names(author_data):
     entries = author_data if isinstance(author_data, list) else [author_data]
     names = []
     for entry in entries:
-        if isinstance(entry, str):
-            names.append(entry)
-        elif isinstance(entry, dict):
-            names.append(entry.get("name", ""))
+        name = entry.get("name") if isinstance(entry, dict) else entry
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
     return names
 
 
