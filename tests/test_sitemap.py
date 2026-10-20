@@ -1,7 +1,8 @@
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
+from calibre_plugins.blog_rating_sync.network import fetch_bytes
 from calibre_plugins.blog_rating_sync.sitemap import MAX_SITEMAP_DEPTH, fetch_book_urls
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -27,6 +28,7 @@ PREFIXED_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
 HYPERION = "https://alexgude.com/books/hyperion/"
 ACCELERANDO = "https://alexgude.com/books/accelerando/"
 BLINDSIGHT = "https://alexgude.com/books/blindsight/"
+DUNE = "https://alexgude.com/books/dune/"
 
 
 def _urlset(*urls):
@@ -172,3 +174,42 @@ def test_top_level_failure_raises(http_server):
 
     with pytest.raises(urllib.error.HTTPError):
         fetch_book_urls(http_server.url("/sitemap.xml"))
+
+
+def test_loc_whitespace_is_stripped_in_urlset():
+    urlset = _urlset("\n      https://alexgude.com/books/hyperion/\n    ", DUNE)
+    with patch(
+        "calibre_plugins.blog_rating_sync.sitemap.fetch_bytes",
+        return_value=urlset,
+    ):
+        urls, failures = fetch_book_urls("https://alexgude.com/sitemap.xml")
+
+    assert urls == [HYPERION, DUNE]
+    assert failures == []
+
+
+def test_loc_whitespace_is_stripped_in_sitemap_index(http_server):
+    sitemap_url = http_server.url("/sitemap.xml")
+    child_url = http_server.url("/a.xml")
+    http_server.route("/sitemap.xml", body=_sitemapindex(f"\n    {child_url}\n  "))
+    http_server.route("/a.xml", body=_urlset(HYPERION))
+
+    with patch(
+        "calibre_plugins.blog_rating_sync.sitemap.fetch_bytes",
+        wraps=fetch_bytes,
+    ) as fetch:
+        urls, failures = fetch_book_urls(sitemap_url)
+
+    assert urls == [HYPERION]
+    assert failures == []
+    assert fetch.call_args_list == [call(sitemap_url), call(child_url)]
+
+
+def test_whitespace_only_loc_is_skipped(http_server):
+    http_server.route("/sitemap.xml", body=_sitemapindex("\n   ", http_server.url("/b.xml")))
+    http_server.route("/b.xml", body=_urlset("  \n  ", BLINDSIGHT))
+
+    urls, failures = fetch_book_urls(http_server.url("/sitemap.xml"))
+
+    assert urls == [BLINDSIGHT]
+    assert failures == []

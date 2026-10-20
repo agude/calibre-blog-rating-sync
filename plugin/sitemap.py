@@ -35,17 +35,24 @@ def _collect_book_urls(sitemap_url, path_prefix, depth, urls, failures):
 
     sub_sitemaps = root.findall(".//sm:sitemap/sm:loc", SITEMAP_NAMESPACE)
     if sub_sitemaps:
-        for loc in sub_sitemaps:
-            if loc.text:
-                try:
-                    _collect_book_urls(loc.text, path_prefix, depth + 1, urls, failures)
-                except Exception as error:
-                    failures.append((loc.text, str(error) or type(error).__name__))
+        for child_url in _loc_texts(sub_sitemaps):
+            try:
+                _collect_book_urls(child_url, path_prefix, depth + 1, urls, failures)
+            except Exception as error:
+                failures.append((child_url, str(error) or type(error).__name__))
         return
 
-    all_urls = [loc.text for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE) if loc.text]
+    all_urls = _loc_texts(root.findall(".//sm:loc", SITEMAP_NAMESPACE))
     book_urls = [url for url in all_urls if _is_book_page(url, path_prefix)]
     urls.extend(book_urls)
+
+
+def _loc_texts(elements):
+    """Yield each <loc> text with surrounding whitespace removed, skipping empty ones."""
+    for element in elements:
+        text = (element.text or "").strip()
+        if text:
+            yield text
 
 
 def _is_book_page(url, path_prefix):
