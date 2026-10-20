@@ -1,5 +1,4 @@
-import time
-from urllib.error import URLError
+import threading
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -52,6 +51,37 @@ def fetch_page(url):
         return data.decode(FALLBACK_CHARSET, errors="replace")
 
 
+def fetch_all(urls, fetch=None, cancel_event=None, on_progress=None, delay_seconds=None):
+    """Fetch each URL in order and return (results, was_cancelled).
+
+    Each result is (url, html, error). An exception from one fetch becomes that
+    URL's error text, and the loop continues. The wait between URLs goes through
+    cancel_event, so a cancel ends the wait at once.
+    """
+    if fetch is None:
+        fetch = fetch_page
+    if delay_seconds is None:
+        delay_seconds = REQUEST_DELAY_SECONDS
+    if cancel_event is None:
+        cancel_event = threading.Event()
+
+    results = []
+    total = len(urls)
+    for index, url in enumerate(urls):
+        if cancel_event.is_set():
+            break
+        if on_progress is not None:
+            on_progress(index, total, url)
+        try:
+            html = fetch(url)
+            results.append((url, html, None))
+        except Exception as error:
+            results.append((url, None, str(error) or type(error).__name__))
+        if index < total - 1:
+            cancel_event.wait(delay_seconds)
+    return results, cancel_event.is_set()
+
+
 class BatchFetchWorker(QObject):
     """Fetches a list of URLs on a background thread."""
 
@@ -61,26 +91,22 @@ class BatchFetchWorker(QObject):
     def __init__(self, urls):
         super().__init__()
         self._urls = urls
-        self._is_cancelled = False
+        self._cancel_event = threading.Event()
 
     def cancel(self):
-        self._is_cancelled = True
+        self._cancel_event.set()
 
     def run(self):
         results = []
-        total = len(self._urls)
-        for index, url in enumerate(self._urls):
-            if self._is_cancelled:
-                break
-            self.progress.emit(index, total, url)
-            try:
-                html = fetch_page(url)
-                results.append((url, html, None))
-            except (URLError, OSError, ValueError) as error:
-                results.append((url, None, str(error)))
-            if index < total - 1:
-                time.sleep(REQUEST_DELAY_SECONDS)
-        self.finished.emit(results, self._is_cancelled)
+        was_cancelled = False
+        try:
+            results, was_cancelled = fetch_all(
+                self._urls,
+                cancel_event=self._cancel_event,
+                on_progress=self.progress.emit,
+            )
+        finally:
+            self.finished.emit(results, was_cancelled)
 
 
 def start_batch_fetch(urls, on_progress, on_finished, parent=None):
