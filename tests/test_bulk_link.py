@@ -1,5 +1,9 @@
-from calibre_plugins.blog_rating_sync.bulk_link import _BulkMatchModel
-from calibre_plugins.blog_rating_sync.matching import MatchCandidate, ReviewMatch
+import json
+import threading
+
+from calibre_plugins.blog_rating_sync import network
+from calibre_plugins.blog_rating_sync.bulk_link import _BulkMatchModel, _fetch_and_match
+from calibre_plugins.blog_rating_sync.matching import MatchCandidate, MatchStats, ReviewMatch
 from qt.core import Qt
 
 _EDIT_ROLE = Qt.ItemDataRole.EditRole
@@ -81,3 +85,58 @@ def test_setdata_skip_selection_always_writes():
     result = m.setData(m.index(0, _BulkMatchModel.COL_CALIBRE_MATCH), 0, _EDIT_ROLE)
     assert result is True
     assert data[0].selected_index == 0
+
+
+# ---------------------------------------------------------------------------
+# _fetch_and_match
+# ---------------------------------------------------------------------------
+
+
+def _review_page(title, author, rating):
+    review = {
+        "@type": "Review",
+        "reviewRating": {
+            "@type": "Rating",
+            "ratingValue": rating,
+            "bestRating": "5",
+            "worstRating": "1",
+        },
+        "itemReviewed": {
+            "@type": "Book",
+            "name": title,
+            "author": [{"@type": "Person", "name": author}],
+        },
+    }
+    script = f'<script type="application/ld+json">{json.dumps(review)}</script>'
+    return f"<html><head>{script}</head><body></body></html>"
+
+
+def test_fetch_and_match_returns_matches_stats_and_cancel_flag(monkeypatch):
+    pages = {
+        "https://alexgude.com/books/hyperion/": _review_page("Hyperion", "Dan Simmons", "4"),
+        "https://alexgude.com/books/dune/": _review_page("Dune", "Frank Herbert", "4.5"),
+        "https://alexgude.com/books/unmatched/": _review_page("Zzz Unmatched", "Nobody", "2"),
+    }
+
+    def fake_fetch(url):
+        if url not in pages:
+            raise ValueError("timed out")
+        return pages[url]
+
+    monkeypatch.setattr(network, "fetch_page", fake_fetch)
+    monkeypatch.setattr(network, "REQUEST_DELAY_SECONDS", 0)
+    calibre_books = {1: ("Hyperion", ["Dan Simmons"]), 2: ("Dune", ["Frank Herbert"])}
+    urls = [*pages, "https://alexgude.com/books/broken/"]
+    progress = []
+
+    matches, stats, was_cancelled = _fetch_and_match(
+        urls,
+        calibre_books,
+        threading.Event(),
+        lambda index, total, url: progress.append((index, total, url)),
+    )
+
+    assert [match.blog_title for match in matches] == ["Hyperion", "Dune"]
+    assert stats == MatchStats(outdated=0, errors=1, no_candidates=1)
+    assert was_cancelled is False
+    assert progress == [(index, len(urls), url) for index, url in enumerate(urls)]

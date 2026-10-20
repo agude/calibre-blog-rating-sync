@@ -84,22 +84,39 @@ def join_thread(app, thread, timeout=5.0):
         app.processEvents()
 
 
+def _fetch_task(network_module, urls):
+    """Return a start_task task that runs fetch_all over urls on the worker thread."""
+
+    def task(cancel_event, report_progress):
+        return network_module.fetch_all(
+            urls, cancel_event=cancel_event, on_progress=report_progress
+        )
+
+    return task
+
+
 def test_results_reach_on_finished_on_the_main_thread(qt_app, qt_network, monkeypatch):
     monkeypatch.setattr(qt_network, "fetch_page", _fake_fetch)
     monkeypatch.setattr(qt_network, "REQUEST_DELAY_SECONDS", 0.01)
     finished = []
 
-    def on_finished(results, was_cancelled):
+    def on_finished(result, error_text):
         on_main_thread = QtCore.QThread.currentThread() == qt_app.thread()
-        finished.append((results, was_cancelled, on_main_thread))
+        finished.append((result, error_text, on_main_thread))
 
-    thread, _worker = qt_network.start_batch_fetch(URLS, lambda *args: None, on_finished)
+    thread, _worker = qt_network.start_task(_fetch_task(qt_network, URLS), on_finished)
     try:
         wait_until(qt_app, lambda: bool(finished))
     finally:
         join_thread(qt_app, thread)
 
-    assert finished == [([(url, _fake_fetch(url), None) for url in URLS], False, True)]
+    assert len(finished) == 1
+    result, error_text, on_main_thread = finished[0]
+    results, was_cancelled = result
+    assert error_text is None
+    assert on_main_thread is True
+    assert results == [(url, _fake_fetch(url), None) for url in URLS]
+    assert was_cancelled is False
 
 
 def test_cancel_signal_stops_fetch_early(qt_app, qt_network, monkeypatch):
@@ -109,10 +126,10 @@ def test_cancel_signal_stops_fetch_early(qt_app, qt_network, monkeypatch):
     cancel_source = _CancelSource()
     progress = []
     finished = []
-    thread, _worker = qt_network.start_batch_fetch(
-        urls,
-        lambda index, total, url: progress.append(index),
-        lambda results, was_cancelled: finished.append((results, was_cancelled)),
+    thread, _worker = qt_network.start_task(
+        _fetch_task(qt_network, urls),
+        lambda result, error_text: finished.append((result, error_text)),
+        on_progress=lambda index, total, url: progress.append(index),
         cancel_signal=cancel_source.canceled,
     )
     try:
@@ -122,7 +139,10 @@ def test_cancel_signal_stops_fetch_early(qt_app, qt_network, monkeypatch):
     finally:
         join_thread(qt_app, thread)
 
-    results, was_cancelled = finished[0]
+    assert len(finished) == 1
+    result, error_text = finished[0]
+    results, was_cancelled = result
+    assert error_text is None
     assert len(results) < len(urls)
     assert was_cancelled is True
 
@@ -136,26 +156,25 @@ def test_bad_status_line_still_finishes(qt_app, qt_network, monkeypatch):
     monkeypatch.setattr(qt_network, "fetch_page", fetch)
     monkeypatch.setattr(qt_network, "REQUEST_DELAY_SECONDS", 0.01)
     finished = []
-    thread, _worker = qt_network.start_batch_fetch(
-        URLS,
-        lambda *args: None,
-        lambda results, was_cancelled: finished.append((results, was_cancelled)),
+    thread, _worker = qt_network.start_task(
+        _fetch_task(qt_network, URLS),
+        lambda result, error_text: finished.append((result, error_text)),
     )
     try:
         wait_until(qt_app, lambda: bool(finished))
     finally:
         join_thread(qt_app, thread)
 
-    assert finished == [
-        (
-            [
-                (URLS[0], _fake_fetch(URLS[0]), None),
-                (URLS[1], None, "garbage"),
-                (URLS[2], _fake_fetch(URLS[2]), None),
-            ],
-            False,
-        )
+    assert len(finished) == 1
+    result, error_text = finished[0]
+    results, was_cancelled = result
+    assert error_text is None
+    assert results == [
+        (URLS[0], _fake_fetch(URLS[0]), None),
+        (URLS[1], None, "garbage"),
+        (URLS[2], _fake_fetch(URLS[2]), None),
     ]
+    assert was_cancelled is False
 
 
 def test_start_task_runs_off_main_thread_and_finishes_on_main_thread(qt_app, qt_network):

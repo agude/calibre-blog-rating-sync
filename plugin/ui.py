@@ -42,7 +42,7 @@ class BlogRatingSyncAction(InterfaceAction):
         return column
 
     def sync_ratings(self):
-        from calibre_plugins.blog_rating_sync.network import start_batch_fetch
+        from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
         from calibre_plugins.blog_rating_sync.sync import (
             apply_fetched_ratings,
             collect_linked_books,
@@ -73,15 +73,30 @@ class BlogRatingSyncAction(InterfaceAction):
             progress.setValue(index)
             progress.setLabelText(f"Fetching {index + 1}/{total}...")
 
-        def on_finished(fetch_results, was_cancelled):
+        def on_finished(result, error_text):
             self._sync_in_progress = False
             progress.setValue(progress.maximum())
+            if error_text:
+                error_dialog(
+                    self.gui,
+                    "Blog Rating Sync",
+                    f"Sync failed: {error_text}",
+                    show=True,
+                )
+                return
+            fetch_results, was_cancelled = result
             updated, skipped, errors = apply_fetched_ratings(db, linked_books, fetch_results)
             self._show_sync_results(updated, skipped, errors, was_cancelled)
 
         self._sync_in_progress = True
-        start_batch_fetch(
-            urls, on_progress, on_finished, cancel_signal=progress.canceled, parent=self.gui
+        start_task(
+            lambda cancel_event, report_progress: fetch_all(
+                urls, cancel_event=cancel_event, on_progress=report_progress
+            ),
+            on_finished,
+            on_progress=on_progress,
+            cancel_signal=progress.canceled,
+            parent=self.gui,
         )
 
     def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):

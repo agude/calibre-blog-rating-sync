@@ -6,7 +6,7 @@ from calibre_plugins.blog_rating_sync.matching import (
     find_conflict_rows,
     selected_links,
 )
-from calibre_plugins.blog_rating_sync.network import start_batch_fetch, start_task
+from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
 from calibre_plugins.blog_rating_sync.scraper import normalize_url
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 from calibre_plugins.blog_rating_sync.sync import apply_links
@@ -26,6 +26,15 @@ from qt.core import (
 )
 
 SKIP_LABEL = "— Skip —"
+
+
+def _fetch_and_match(urls, calibre_books, cancel_event, report_progress):
+    """Fetch and score review pages. Runs on the worker thread, so it touches no widgets."""
+    fetch_results, was_cancelled = fetch_all(
+        urls, cancel_event=cancel_event, on_progress=report_progress
+    )
+    matches, stats = build_review_matches(fetch_results, calibre_books)
+    return matches, stats, was_cancelled
 
 
 class _CandidateComboDelegate(QStyledItemDelegate):
@@ -103,8 +112,8 @@ class BulkLinkDialog(QDialog):
         self._is_closed = False
 
     def done(self, result):
-        # Closing mid-fetch: stop the batch worker (the parented thread cleans
-        # itself up, see start_batch_fetch) and make sure a still-running
+        # Closing mid-fetch: stop the worker (the parented thread cleans
+        # itself up, see start_task) and make sure a still-running
         # sitemap fetch does not start a new batch on this hidden dialog.
         self._is_closed = True
         if self._fetch_worker is not None:
@@ -162,10 +171,14 @@ class BulkLinkDialog(QDialog):
         self._progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._progress.show()
 
-        _thread, self._fetch_worker = start_batch_fetch(
-            unlinked_urls,
-            self._on_fetch_progress,
+        # The worker thread gets the book map as a local, never self.
+        calibre_books = self._calibre_books
+        _thread, self._fetch_worker = start_task(
+            lambda cancel_event, report_progress: _fetch_and_match(
+                unlinked_urls, calibre_books, cancel_event, report_progress
+            ),
             self._on_fetch_complete,
+            on_progress=self._on_fetch_progress,
             cancel_signal=self._progress.canceled,
             parent=self.parent(),
         )
@@ -174,13 +187,17 @@ class BulkLinkDialog(QDialog):
         self._progress.setValue(index)
         self._progress.setLabelText(f"Fetching {index + 1}/{total}...")
 
-    def _on_fetch_complete(self, fetch_results, was_cancelled):
+    def _on_fetch_complete(self, result, error_text):
         self._fetch_worker = None
         if self._is_closed:
             return
         self._progress.setValue(self._progress.maximum())
 
-        matches, stats = build_review_matches(fetch_results, self._calibre_books)
+        if error_text:
+            self.status_label.setText(f"Failed to fetch reviews: {error_text}")
+            return
+
+        matches, stats, was_cancelled = result
         self._matches = matches
         model = _BulkMatchModel(self._matches)
         self.table.setModel(model)

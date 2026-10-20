@@ -1,14 +1,8 @@
 import http.client
 import threading
 
-import pytest
 from calibre_plugins.blog_rating_sync import network
-from calibre_plugins.blog_rating_sync.network import (
-    BatchFetchWorker,
-    fetch_all,
-    start_batch_fetch,
-)
-from qt.core import QObject, Qt, pyqtSignal
+from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
 
 URLS = [
     "https://example.com/first",
@@ -129,74 +123,38 @@ def test_fetch_all_waits_between_urls_only():
     assert was_cancelled is False
 
 
-def test_batch_worker_emits_finished_once_on_success(monkeypatch):
+def _fetch_task(urls):
+    """Return a start_task task that runs network.fetch_all over urls."""
+
+    def task(cancel_event, report_progress):
+        return network.fetch_all(urls, cancel_event=cancel_event, on_progress=report_progress)
+
+    return task
+
+
+def test_start_task_fetch_all_reports_progress_and_finishes_once(monkeypatch):
     monkeypatch.setattr(network, "fetch_page", _fake_fetch)
     monkeypatch.setattr(network, "REQUEST_DELAY_SECONDS", 0)
-    worker = BatchFetchWorker(URLS)
     progress = []
     finished = []
-    worker.progress.connect(lambda *args: progress.append(args))
-    worker.finished.connect(
-        lambda results, was_cancelled: finished.append((results, was_cancelled))
+
+    start_task(
+        _fetch_task(URLS),
+        lambda result, error_text: finished.append((result, error_text)),
+        on_progress=lambda *args: progress.append(args),
     )
 
-    worker.run()
-
     assert progress == [(index, len(URLS), url) for index, url in enumerate(URLS)]
-    assert finished == [([(url, _fake_fetch(url), None) for url in URLS], False)]
+    assert finished == [(([(url, _fake_fetch(url), None) for url in URLS], False), None)]
 
 
-def test_batch_worker_emits_finished_once_when_fetch_all_raises(monkeypatch):
+def test_start_task_reports_fetch_all_failure_once(monkeypatch):
     def broken_fetch_all(*args, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(network, "fetch_all", broken_fetch_all)
-    worker = BatchFetchWorker(URLS)
     finished = []
-    worker.finished.connect(
-        lambda results, was_cancelled: finished.append((results, was_cancelled))
-    )
 
-    with pytest.raises(RuntimeError, match="boom"):
-        worker.run()
+    start_task(_fetch_task(URLS), lambda result, error_text: finished.append((result, error_text)))
 
-    assert finished == [([], False)]
-
-
-class _CancelSource(QObject):
-    canceled = pyqtSignal()
-
-
-@pytest.fixture
-def instant_fetch(monkeypatch):
-    monkeypatch.setattr(network, "fetch_page", _fake_fetch)
-    monkeypatch.setattr(network, "REQUEST_DELAY_SECONDS", 0)
-
-
-def test_start_batch_fetch_connects_cancel_directly(instant_fetch):
-    cancel_source = _CancelSource()
-
-    _thread, worker = start_batch_fetch(
-        URLS,
-        lambda *args: None,
-        lambda *args: None,
-        cancel_signal=cancel_source.canceled,
-    )
-
-    assert cancel_source.canceled.connections == [
-        (worker.cancel, Qt.ConnectionType.DirectConnection)
-    ]
-
-
-def test_cancel_signal_sets_the_worker_event(instant_fetch):
-    cancel_source = _CancelSource()
-
-    _thread, worker = start_batch_fetch(
-        URLS,
-        lambda *args: None,
-        lambda *args: None,
-        cancel_signal=cancel_source.canceled,
-    )
-    cancel_source.canceled.emit()
-
-    assert worker._cancel_event.is_set()
+    assert finished == [(None, "boom")]

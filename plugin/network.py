@@ -93,62 +93,6 @@ def fetch_all(urls, fetch=None, cancel_event=None, on_progress=None, delay_secon
     return results, cancel_event.is_set()
 
 
-class BatchFetchWorker(QObject):
-    """Fetches a list of URLs on a background thread."""
-
-    progress = pyqtSignal(int, int, str)
-    finished = pyqtSignal(list, bool)
-
-    def __init__(self, urls):
-        super().__init__()
-        self._urls = urls
-        self._cancel_event = threading.Event()
-
-    def cancel(self):
-        self._cancel_event.set()
-
-    def run(self):
-        results = []
-        was_cancelled = False
-        try:
-            results, was_cancelled = fetch_all(
-                self._urls,
-                cancel_event=self._cancel_event,
-                on_progress=self.progress.emit,
-            )
-        finally:
-            self.finished.emit(results, was_cancelled)
-
-
-def start_batch_fetch(urls, on_progress, on_finished, cancel_signal=None, parent=None):
-    """Start fetching URLs on a background thread.
-
-    The thread is parented to `parent` (which must outlive the fetch) and
-    deletes itself and the worker once done, so callers may drop the returned
-    (thread, worker) references at any time — e.g. when a dialog closes
-    mid-fetch. on_finished receives (results, was_cancelled).
-    """
-    thread = QThread(parent)
-    worker = BatchFetchWorker(urls)
-    worker.moveToThread(thread)
-    thread._worker = worker  # keep the worker alive for the thread's lifetime
-
-    thread.started.connect(worker.run)
-    worker.progress.connect(on_progress)
-    worker.finished.connect(on_finished)
-    worker.finished.connect(thread.quit)
-    thread.finished.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
-    if cancel_signal is not None:
-        # The worker thread sits in run() with no event loop, so a queued call
-        # would arrive only after the fetch ends. A direct call is safe because
-        # cancel() only sets a threading.Event.
-        cancel_signal.connect(worker.cancel, type=Qt.ConnectionType.DirectConnection)
-
-    thread.start()
-    return thread, worker
-
-
 class _TaskWorker(QObject):
     """Runs one task on a background thread and reports its outcome once."""
 
