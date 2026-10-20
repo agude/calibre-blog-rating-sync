@@ -67,6 +67,27 @@ def apply_fetched_ratings(db, linked_books, fetch_results):
     return updated, skipped, errors
 
 
+def apply_links(db, column, links) -> int:
+    """Write each link's URL to column, and its rating to "rating" when given.
+
+    `links` is a list of (book_id, url, rating_or_None), with ratings in blog
+    stars. Returns the number of ratings written.
+    """
+    urls = {}
+    ratings = {}
+    for book_id, url, blog_rating in links:
+        urls[book_id] = url
+        if blog_rating is not None:
+            ratings[book_id] = to_calibre_rating(blog_rating)
+
+    if urls:
+        db.set_field(column, urls)
+    if ratings:
+        db.set_field("rating", ratings)
+
+    return len(ratings)
+
+
 def format_sync_report(updated, skipped, errors, was_cancelled=False) -> str:
     """Return the text shown after a sync: updated, skipped, and error lines."""
     lines = []

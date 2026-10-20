@@ -10,7 +10,7 @@ from calibre_plugins.blog_rating_sync.scraper import (
     match_score,
 )
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
-from calibre_plugins.blog_rating_sync.sync import to_calibre_rating
+from calibre_plugins.blog_rating_sync.sync import apply_links
 from qt.core import (
     QAbstractTableModel,
     QComboBox,
@@ -365,13 +365,11 @@ class BulkLinkDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        rating_count = 0
-        for match, candidate in to_link:
-            self.db.set_field(self.column, {candidate.calibre_id: match.blog_url})
-            if match.blog_rating is not None:
-                new_rating = to_calibre_rating(match.blog_rating)
-                self.db.set_field("rating", {candidate.calibre_id: new_rating})
-                rating_count += 1
+        links = [
+            (candidate.calibre_id, match.blog_url, match.blog_rating)
+            for match, candidate in to_link
+        ]
+        rating_count = apply_links(self.db, self.column, links)
 
         self.linked_count = len(to_link)
         self.status_label.setText(

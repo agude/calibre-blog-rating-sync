@@ -1,5 +1,6 @@
 from calibre_plugins.blog_rating_sync.sync import (
     apply_fetched_ratings,
+    apply_links,
     collect_linked_books,
     format_sync_report,
     to_calibre_rating,
@@ -203,6 +204,77 @@ def test_apply_makes_no_write_when_nothing_changed():
     apply_fetched_ratings(db, linked, fetch_results)
 
     assert db.set_field_calls == []
+
+
+def test_apply_links_writes_urls_and_ratings_in_two_calls():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion"},
+            2: {"title": "Accelerando"},
+        }
+    )
+    links = [
+        (1, "https://example.com/hyperion/", 2.5),
+        (2, "https://example.com/accelerando/", 3.5),
+    ]
+
+    apply_links(db, "#blog_url", links)
+
+    assert db.set_field_calls == [
+        (
+            "#blog_url",
+            {1: "https://example.com/hyperion/", 2: "https://example.com/accelerando/"},
+        ),
+        ("rating", {1: 5, 2: 7}),
+    ]
+    assert db._books[1]["#blog_url"] == "https://example.com/hyperion/"
+    assert db._books[2]["rating"] == 7
+
+
+def test_apply_links_skips_none_ratings():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+            2: {"title": "Accelerando"},
+        }
+    )
+    links = [
+        (1, "https://example.com/hyperion/", None),
+        (2, "https://example.com/accelerando/", 4),
+    ]
+
+    apply_links(db, "#blog_url", links)
+
+    assert db.set_field_calls == [
+        (
+            "#blog_url",
+            {1: "https://example.com/hyperion/", 2: "https://example.com/accelerando/"},
+        ),
+        ("rating", {2: 8}),
+    ]
+    assert db._books[1]["rating"] == 6
+
+    unrated_db = FakeDb({1: {"title": "Hyperion"}})
+    apply_links(unrated_db, "#blog_url", [(1, "https://example.com/hyperion/", None)])
+
+    assert unrated_db.set_field_calls == [("#blog_url", {1: "https://example.com/hyperion/"})]
+
+
+def test_apply_links_returns_rating_count():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion"},
+            2: {"title": "Blindsight"},
+            3: {"title": "Accelerando"},
+        }
+    )
+    links = [
+        (1, "https://example.com/hyperion/", 5),
+        (2, "https://example.com/blindsight/", None),
+        (3, "https://example.com/accelerando/", 3.5),
+    ]
+
+    assert apply_links(db, "#blog_url", links) == 2
 
 
 def test_unique_urls_keeps_first_seen_order():
