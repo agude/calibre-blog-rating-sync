@@ -51,10 +51,11 @@ hooks-install:
 clean:
     rm -f {{plugin_name}}
 
-# Bump the version in constants.py and pyproject.toml: just bump major|minor|patch
+# Bump the version in constants.py, pyproject.toml, and uv.lock: just bump major|minor|patch
 bump kind:
     #!/usr/bin/env python3
     import re
+    import subprocess
     import sys
 
     kind = "{{kind}}"
@@ -94,5 +95,7 @@ bump kind:
     )
     with open("pyproject.toml", "w") as target:
         target.write(pyproject)
+
+    subprocess.run(["uv", "lock"], check=True)
 
     print(f"Bumped version to {major}.{minor}.{patch}")

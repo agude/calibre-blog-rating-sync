@@ -22,7 +22,7 @@ just test         # pytest
 just test tests/test_sync.py --no-cov  # run one file; --no-cov skips the gate
 just check        # everything CI runs: lint + test
 just build        # produce BlogRatingSync.zip for loading into Calibre
-just bump patch   # bump the version in constants.py and pyproject.toml
+just bump patch   # bump the version in constants.py, pyproject.toml, and uv.lock
 just hooks-install  # install bin/pre-commit.sh into this clone
 ```
 
@@ -38,8 +38,9 @@ just hooks-install  # install bin/pre-commit.sh into this clone
   mypy config; that FAIL is expected here.
 - **Version lives in two files.** `plugin/constants.py` holds
   `PLUGIN_VERSION` as a tuple because Calibre requires that form, and
-  `pyproject.toml` holds the string. `just bump` keeps them in step. This is
-  the one place the single-source-of-version rule cannot apply.
+  `pyproject.toml` holds the string. `just bump` keeps them in step and then
+  runs `uv lock`, so `uv.lock` records the new version too. This is the one
+  place the single-source-of-version rule cannot apply.
 
 ## Layout
 
