@@ -31,7 +31,18 @@ def _read_capped(response):
     data = response.read(MAX_RESPONSE_BYTES + 1)
     if len(data) > MAX_RESPONSE_BYTES:
         raise ValueError(f"Response exceeds {MAX_RESPONSE_BYTES} bytes")
+    declared = _declared_length(response)
+    if declared is not None and len(data) < declared:
+        raise ValueError(f"Truncated response: got {len(data)} of {declared} bytes")
     return data
+
+
+def _declared_length(response):
+    """Return the Content-Length as an int, or None if absent or unparseable."""
+    try:
+        return int(response.headers.get("Content-Length"))
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_bytes(url):

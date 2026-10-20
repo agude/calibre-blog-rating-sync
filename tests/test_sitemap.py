@@ -56,3 +56,35 @@ def test_fetch_book_urls_with_namespace_prefix():
 def test_rejects_file_scheme():
     with pytest.raises(ValueError, match="not allowed"):
         fetch_book_urls("file:///etc/passwd")
+
+
+def test_fetch_book_urls_reads_sitemap_index_over_http(http_server):
+    index = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <sitemap><loc>{http_server.url('/a.xml')}</loc></sitemap>\n"
+        f"  <sitemap><loc>{http_server.url('/b.xml')}</loc></sitemap>\n"
+        "</sitemapindex>"
+    )
+    child_a = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://alexgude.com/books/hyperion/</loc></url>
+  <url><loc>https://alexgude.com/blog/some-post/</loc></url>
+  <url><loc>https://alexgude.com/books/accelerando/</loc></url>
+</urlset>"""
+    child_b = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://alexgude.com/books/blindsight/</loc></url>
+  <url><loc>https://alexgude.com/about/</loc></url>
+</urlset>"""
+    http_server.route("/sitemap.xml", body=index.encode("utf-8"))
+    http_server.route("/a.xml", body=child_a.encode("utf-8"))
+    http_server.route("/b.xml", body=child_b.encode("utf-8"))
+
+    urls = fetch_book_urls(http_server.url("/sitemap.xml"))
+
+    assert urls == [
+        "https://alexgude.com/books/hyperion/",
+        "https://alexgude.com/books/accelerando/",
+        "https://alexgude.com/books/blindsight/",
+    ]
