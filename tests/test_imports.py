@@ -10,7 +10,18 @@ PLUGIN_INIT_PATH = Path(__file__).resolve().parents[1] / "plugin" / "__init__.py
 
 @pytest.mark.parametrize(
     "module_name",
-    ["bulk_link", "config", "constants", "link", "network", "scraper", "sitemap", "sync", "ui"],
+    [
+        "bulk_link",
+        "config",
+        "constants",
+        "link",
+        "matching",
+        "network",
+        "scraper",
+        "sitemap",
+        "sync",
+        "ui",
+    ],
 )
 def test_module_imports(module_name):
     importlib.import_module(f"calibre_plugins.blog_rating_sync.{module_name}")

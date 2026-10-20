@@ -1,7 +1,15 @@
-from dataclasses import dataclass
-from typing import ClassVar, List, Optional
+from typing import ClassVar
 
 from calibre_plugins.blog_rating_sync.config import prefs
+from calibre_plugins.blog_rating_sync.matching import (
+    AUTO_SELECT_THRESHOLD,
+    MINIMUM_MATCH_SCORE,
+    TOP_N_CANDIDATES,
+    MatchCandidate,
+    ReviewMatch,
+    deselect_duplicate_selections,
+    find_conflict_rows,
+)
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
 from calibre_plugins.blog_rating_sync.scraper import (
     match_score,
@@ -26,36 +34,7 @@ from qt.core import (
     QVBoxLayout,
 )
 
-AUTO_SELECT_THRESHOLD = 0.7
-MINIMUM_MATCH_SCORE = 0.3
-TOP_N_CANDIDATES = 5
 SKIP_LABEL = "— Skip —"
-
-
-@dataclass
-class MatchCandidate:
-    calibre_id: int
-    calibre_title: str
-    calibre_authors: str
-    score: float
-
-    def display_label(self):
-        return f"{self.calibre_title} — {self.calibre_authors}"
-
-
-@dataclass
-class ReviewMatch:
-    blog_title: str
-    blog_authors: str
-    blog_rating: Optional[float]
-    blog_url: str
-    candidates: List[MatchCandidate]
-    selected_index: int  # 0 = Skip, otherwise 1-based index into candidates
-
-    def selected_candidate(self):
-        if self.selected_index == 0:
-            return None
-        return self.candidates[self.selected_index - 1]
 
 
 class _SitemapFetchThread(QThread):
@@ -71,47 +50,6 @@ class _SitemapFetchThread(QThread):
             self.urls, self.failures = fetch_book_urls(self._sitemap_url)
         except Exception as error:
             self.error = str(error)
-
-
-def _deselect_duplicate_selections(matches):
-    """Reset duplicate selections so each Calibre book is selected at most once.
-
-    When several blog reviews auto-select the same Calibre book, only the
-    highest-scoring one keeps its selection; the rest are reset to Skip. Rows
-    are never dropped — a deselected review stays visible so the user can pick
-    one of its other candidates.
-    """
-    best_score_for_book = {}
-    for match in matches:
-        candidate = match.selected_candidate()
-        if candidate is None:
-            continue
-        best_score_for_book[candidate.calibre_id] = max(
-            best_score_for_book.get(candidate.calibre_id, 0.0), candidate.score
-        )
-
-    claimed_book_ids = set()
-    for match in matches:
-        candidate = match.selected_candidate()
-        if candidate is None:
-            continue
-        is_best = candidate.score >= best_score_for_book[candidate.calibre_id]
-        if not is_best or candidate.calibre_id in claimed_book_ids:
-            match.selected_index = 0
-        else:
-            claimed_book_ids.add(candidate.calibre_id)
-
-
-def _find_conflict_rows(data, current_row, calibre_id):
-    """Return all row indices (excluding current_row) whose selected book is calibre_id."""
-    conflict_rows = []
-    for row, match in enumerate(data):
-        if row == current_row:
-            continue
-        candidate = match.selected_candidate()
-        if candidate is not None and candidate.calibre_id == calibre_id:
-            conflict_rows.append(row)
-    return conflict_rows
 
 
 class _CandidateComboDelegate(QStyledItemDelegate):
@@ -320,7 +258,7 @@ class BulkLinkDialog(QDialog):
                 )
             )
 
-        _deselect_duplicate_selections(matches)
+        deselect_duplicate_selections(matches)
 
         self._matches = sorted(matches, key=lambda match: match.candidates[0].score, reverse=True)
         model = _BulkMatchModel(self._matches)
@@ -457,7 +395,7 @@ class _BulkMatchModel(QAbstractTableModel):
 
         if new_idx > 0:
             target_id = self._data[current_row].candidates[new_idx - 1].calibre_id
-            conflict_rows = _find_conflict_rows(self._data, current_row, target_id)
+            conflict_rows = find_conflict_rows(self._data, current_row, target_id)
             if conflict_rows:
                 for row in [*conflict_rows, current_row]:
                     self._data[row].selected_index = 0
