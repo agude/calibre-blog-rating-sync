@@ -79,8 +79,9 @@ class BlogRatingSyncAction(InterfaceAction):
             self._show_sync_results(updated, skipped, errors, was_cancelled)
 
         self._sync_in_progress = True
-        _thread, worker = start_batch_fetch(urls, on_progress, on_finished, parent=self.gui)
-        progress.canceled.connect(worker.cancel)
+        start_batch_fetch(
+            urls, on_progress, on_finished, cancel_signal=progress.canceled, parent=self.gui
+        )
 
     def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):
         lines = []

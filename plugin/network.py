@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from calibre_plugins.blog_rating_sync.constants import PLUGIN_VERSION_STRING
-from qt.core import QObject, QThread, pyqtSignal
+from qt.core import QObject, Qt, QThread, pyqtSignal
 
 FETCH_TIMEOUT_SECONDS = 10
 REQUEST_DELAY_SECONDS = 0.5
@@ -109,7 +109,7 @@ class BatchFetchWorker(QObject):
             self.finished.emit(results, was_cancelled)
 
 
-def start_batch_fetch(urls, on_progress, on_finished, parent=None):
+def start_batch_fetch(urls, on_progress, on_finished, cancel_signal=None, parent=None):
     """Start fetching URLs on a background thread.
 
     The thread is parented to `parent` (which must outlive the fetch) and
@@ -128,6 +128,11 @@ def start_batch_fetch(urls, on_progress, on_finished, parent=None):
     worker.finished.connect(thread.quit)
     thread.finished.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
+    if cancel_signal is not None:
+        # The worker thread sits in run() with no event loop, so a queued call
+        # would arrive only after the fetch ends. A direct call is safe because
+        # cancel() only sets a threading.Event.
+        cancel_signal.connect(worker.cancel, type=Qt.ConnectionType.DirectConnection)
 
     thread.start()
     return thread, worker

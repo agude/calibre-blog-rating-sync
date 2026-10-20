@@ -3,7 +3,12 @@ import threading
 
 import pytest
 from calibre_plugins.blog_rating_sync import network
-from calibre_plugins.blog_rating_sync.network import BatchFetchWorker, fetch_all
+from calibre_plugins.blog_rating_sync.network import (
+    BatchFetchWorker,
+    fetch_all,
+    start_batch_fetch,
+)
+from qt.core import QObject, Qt, pyqtSignal
 
 URLS = [
     "https://example.com/first",
@@ -156,3 +161,42 @@ def test_batch_worker_emits_finished_once_when_fetch_all_raises(monkeypatch):
         worker.run()
 
     assert finished == [([], False)]
+
+
+class _CancelSource(QObject):
+    canceled = pyqtSignal()
+
+
+@pytest.fixture
+def instant_fetch(monkeypatch):
+    monkeypatch.setattr(network, "fetch_page", _fake_fetch)
+    monkeypatch.setattr(network, "REQUEST_DELAY_SECONDS", 0)
+
+
+def test_start_batch_fetch_connects_cancel_directly(instant_fetch):
+    cancel_source = _CancelSource()
+
+    _thread, worker = start_batch_fetch(
+        URLS,
+        lambda *args: None,
+        lambda *args: None,
+        cancel_signal=cancel_source.canceled,
+    )
+
+    assert cancel_source.canceled.connections == [
+        (worker.cancel, Qt.ConnectionType.DirectConnection)
+    ]
+
+
+def test_cancel_signal_sets_the_worker_event(instant_fetch):
+    cancel_source = _CancelSource()
+
+    _thread, worker = start_batch_fetch(
+        URLS,
+        lambda *args: None,
+        lambda *args: None,
+        cancel_signal=cancel_source.canceled,
+    )
+    cancel_source.canceled.emit()
+
+    assert worker._cancel_event.is_set()

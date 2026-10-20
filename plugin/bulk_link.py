@@ -251,9 +251,9 @@ class BulkLinkDialog(QDialog):
             unlinked_urls,
             self._on_fetch_progress,
             self._on_fetch_complete,
+            cancel_signal=self._progress.canceled,
             parent=self.parent(),
         )
-        self._progress.canceled.connect(self._fetch_worker.cancel)
 
     def _on_fetch_progress(self, index, total, url):
         self._progress.setValue(index)
