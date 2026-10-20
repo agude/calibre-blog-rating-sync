@@ -10,7 +10,7 @@ from calibre_plugins.blog_rating_sync.scraper import (
     match_score,
 )
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
-from calibre_plugins.blog_rating_sync.sync import CALIBRE_STARS_MULTIPLIER
+from calibre_plugins.blog_rating_sync.sync import to_calibre_rating
 from qt.core import (
     QAbstractTableModel,
     QComboBox,
@@ -369,7 +369,7 @@ class BulkLinkDialog(QDialog):
         for match, candidate in to_link:
             self.db.set_field(self.column, {candidate.calibre_id: match.blog_url})
             if match.blog_rating is not None:
-                new_rating = int(match.blog_rating * CALIBRE_STARS_MULTIPLIER)
+                new_rating = to_calibre_rating(match.blog_rating)
                 self.db.set_field("rating", {candidate.calibre_id: new_rating})
                 rating_count += 1
 

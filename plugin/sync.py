@@ -18,13 +18,15 @@ def collect_linked_books(db, column):
 def apply_fetched_ratings(db, linked_books, fetch_results):
     """Process fetch results and update Calibre ratings.
 
-    Returns (updated, skipped, errors) lists.
+    Returns (updated, skipped, errors) lists. Changed ratings are written in
+    one set_field call, made only when at least one rating changed.
     """
     url_to_result = {url: (html, error) for url, html, error in fetch_results}
 
     updated = []
     skipped = []
     errors = []
+    new_ratings = {}
 
     for book_id, (title, url) in linked_books.items():
         result = url_to_result.get(url)
@@ -42,20 +44,28 @@ def apply_fetched_ratings(db, linked_books, fetch_results):
             continue
 
         current_calibre_rating = db.field_for("rating", book_id) or 0
-        new_calibre_rating = int(blog_rating * CALIBRE_STARS_MULTIPLIER)
+        new_calibre_rating = to_calibre_rating(blog_rating)
 
         if current_calibre_rating == new_calibre_rating:
             skipped.append(title)
             continue
 
-        db.set_field("rating", {book_id: new_calibre_rating})
-        old_stars = _stars(current_calibre_rating)
+        new_ratings[book_id] = new_calibre_rating
+        old_stars = to_stars(current_calibre_rating)
         updated.append((title, old_stars, blog_rating))
+
+    if new_ratings:
+        db.set_field("rating", new_ratings)
 
     return updated, skipped, errors
 
 
-def _stars(calibre_rating):
+def to_calibre_rating(stars):
+    """Convert blog stars (multiples of 0.5) to Calibre's 0-10 rating."""
+    return round(stars * CALIBRE_STARS_MULTIPLIER)
+
+
+def to_stars(calibre_rating):
     """Convert Calibre's 0-10 rating to stars, as int when whole (e.g. 7 -> 3.5, 6 -> 3)."""
     stars = calibre_rating / CALIBRE_STARS_MULTIPLIER
     return int(stars) if stars.is_integer() else stars

@@ -1,4 +1,9 @@
-from calibre_plugins.blog_rating_sync.sync import apply_fetched_ratings, collect_linked_books
+from calibre_plugins.blog_rating_sync.sync import (
+    apply_fetched_ratings,
+    collect_linked_books,
+    to_calibre_rating,
+    to_stars,
+)
 
 REVIEW_HTML = """<script type="application/ld+json">{
   "@type": "Review",
@@ -19,6 +24,7 @@ REVIEW_HTML_RATING_3_5 = """<script type="application/ld+json">{
 class FakeDb:
     def __init__(self, books):
         self._books = books
+        self.set_field_calls = []
 
     def all_book_ids(self):
         return list(self._books.keys())
@@ -27,6 +33,7 @@ class FakeDb:
         return self._books.get(book_id, {}).get(field)
 
     def set_field(self, field, updates):
+        self.set_field_calls.append((field, dict(updates)))
         for book_id, value in updates.items():
             if book_id in self._books:
                 self._books[book_id][field] = value
@@ -145,3 +152,52 @@ def test_apply_multiple_books():
     assert len(updated) == 2
     assert db._books[1]["rating"] == 10
     assert db._books[2]["rating"] == 6
+
+
+def test_to_calibre_rating_half_stars():
+    assert to_calibre_rating(0.5) == 1
+    assert to_calibre_rating(3.5) == 7
+    assert to_calibre_rating(4) == 8
+    assert to_calibre_rating(5) == 10
+
+
+def test_to_stars_whole_and_half():
+    assert to_stars(7) == 3.5
+    assert isinstance(to_stars(7), float)
+    assert to_stars(6) == 3
+    assert isinstance(to_stars(6), int)
+
+
+def test_apply_writes_ratings_in_one_call():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 6},
+            2: {"title": "Accelerando", "rating": 4},
+        }
+    )
+    linked = {
+        1: ("Hyperion", "https://example.com/hyperion/"),
+        2: ("Accelerando", "https://example.com/accelerando/"),
+    }
+    fetch_results = [
+        ("https://example.com/hyperion/", REVIEW_HTML, None),
+        ("https://example.com/accelerando/", REVIEW_HTML_RATING_3, None),
+    ]
+
+    apply_fetched_ratings(db, linked, fetch_results)
+
+    assert db.set_field_calls == [("rating", {1: 10, 2: 6})]
+
+
+def test_apply_makes_no_write_when_nothing_changed():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "rating": 10},
+        }
+    )
+    linked = {1: ("Hyperion", "https://example.com/hyperion/")}
+    fetch_results = [("https://example.com/hyperion/", REVIEW_HTML, None)]
+
+    apply_fetched_ratings(db, linked, fetch_results)
+
+    assert db.set_field_calls == []
