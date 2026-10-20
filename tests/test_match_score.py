@@ -5,7 +5,7 @@ URL = "https://alexgude.com/books/anonymous-work/"
 
 def test_exact_title_and_author():
     score = match_score("Hyperion", ["Dan Simmons"], "Hyperion", ["Dan Simmons"])
-    assert score > 0.9
+    assert score == 1.0
 
 
 def test_exact_title_reversed_author():
@@ -15,7 +15,7 @@ def test_exact_title_reversed_author():
 
 def test_case_insensitive():
     score = match_score("hyperion", ["dan simmons"], "Hyperion", ["Dan Simmons"])
-    assert score > 0.9
+    assert score == 1.0
 
 
 def test_subtitle_variation():
@@ -87,7 +87,7 @@ def test_coauthors_different_order():
         "Good Omens",
         ["Neil Gaiman", "Terry Pratchett"],
     )
-    assert score > 0.9
+    assert score == 1.0
 
 
 def test_coauthors_same_order():
@@ -103,7 +103,8 @@ def test_coauthors_same_order():
         "Good Omens",
         ["Neil Gaiman", "Terry Pratchett"],
     )
-    assert abs(same_order - diff_order) < 0.15
+    assert same_order == 1.0
+    assert diff_order == 1.0
 
 
 def test_nameless_author_review_scores_on_title_alone():
