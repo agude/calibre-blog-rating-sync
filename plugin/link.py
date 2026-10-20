@@ -1,4 +1,4 @@
-from calibre_plugins.blog_rating_sync.network import fetch_page
+from calibre_plugins.blog_rating_sync.network import fetch_page, start_task
 from calibre_plugins.blog_rating_sync.scraper import parse_review_page
 from qt.core import (
     QDialog,
@@ -6,26 +6,8 @@ from qt.core import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QThread,
     QVBoxLayout,
-    pyqtSignal,
 )
-
-
-class _FetchWorker(QThread):
-    succeeded = pyqtSignal(str, str)
-    failed = pyqtSignal(str)
-
-    def __init__(self, url, parent=None):
-        super().__init__(parent)
-        self._url = url
-
-    def run(self):
-        try:
-            html = fetch_page(self._url)
-            self.succeeded.emit(self._url, html)
-        except Exception as error:
-            self.failed.emit(str(error))
 
 
 class LinkDialog(QDialog):
@@ -79,7 +61,6 @@ class LinkDialog(QDialog):
         layout.addLayout(button_row)
 
         self._fetched_url = None
-        self._fetch_thread = None
 
     def _on_fetch(self):
         url = self.url_edit.text().strip()
@@ -91,13 +72,21 @@ class LinkDialog(QDialog):
         self.status_label.setText("Fetching...")
         # Parent the thread to the main window, not this dialog: the fetch
         # cannot be interrupted, and the thread must survive the dialog
-        # closing mid-fetch. Signals to this dialog disconnect automatically
-        # if it is destroyed; deleteLater cleans the thread up when done.
-        self._fetch_thread = _FetchWorker(url, self.parent())
-        self._fetch_thread.succeeded.connect(self._on_fetch_succeeded)
-        self._fetch_thread.failed.connect(self._on_fetch_failed)
-        self._fetch_thread.finished.connect(self._fetch_thread.deleteLater)
-        self._fetch_thread.start()
+        # closing mid-fetch. _on_fetch_done is a bound method, so it
+        # disconnects automatically if the dialog is destroyed; start_task
+        # deletes the thread when done.
+        start_task(
+            lambda cancel_event, report_progress: (url, fetch_page(url)),
+            self._on_fetch_done,
+            parent=self.parent(),
+        )
+
+    def _on_fetch_done(self, result, error_text):
+        if error_text:
+            self._on_fetch_failed(error_text)
+            return
+        url, html = result
+        self._on_fetch_succeeded(url, html)
 
     def _on_fetch_failed(self, error_message):
         self.status_label.setText(f"Error: {error_message}")

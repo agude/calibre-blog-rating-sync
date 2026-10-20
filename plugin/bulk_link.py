@@ -6,7 +6,7 @@ from calibre_plugins.blog_rating_sync.matching import (
     find_conflict_rows,
     selected_links,
 )
-from calibre_plugins.blog_rating_sync.network import start_batch_fetch
+from calibre_plugins.blog_rating_sync.network import start_batch_fetch, start_task
 from calibre_plugins.blog_rating_sync.scraper import normalize_url
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 from calibre_plugins.blog_rating_sync.sync import apply_links
@@ -22,26 +22,10 @@ from qt.core import (
     QStyledItemDelegate,
     Qt,
     QTableView,
-    QThread,
     QVBoxLayout,
 )
 
 SKIP_LABEL = "— Skip —"
-
-
-class _SitemapFetchThread(QThread):
-    def __init__(self, sitemap_url, parent=None):
-        super().__init__(parent)
-        self._sitemap_url = sitemap_url
-        self.urls = []
-        self.failures = []
-        self.error = None
-
-    def run(self):
-        try:
-            self.urls, self.failures = fetch_book_urls(self._sitemap_url)
-        except Exception as error:
-            self.error = str(error)
 
 
 class _CandidateComboDelegate(QStyledItemDelegate):
@@ -114,7 +98,6 @@ class BulkLinkDialog(QDialog):
         self._calibre_books = {}
         self._already_linked_urls = set()
         self._progress = None
-        self._sitemap_thread = None
         self._sitemap_failure_count = 0
         self._fetch_worker = None
         self._is_closed = False
@@ -147,30 +130,27 @@ class BulkLinkDialog(QDialog):
         self._already_linked_urls = already_linked_urls
 
         # Parented to the main window so the thread survives this dialog
-        # closing mid-fetch; deleteLater cleans it up when done.
-        self._sitemap_thread = _SitemapFetchThread(sitemap_url, self.parent())
-        self._sitemap_thread.finished.connect(self._on_sitemap_fetched)
-        self._sitemap_thread.finished.connect(self._sitemap_thread.deleteLater)
-        self._sitemap_thread.start()
+        # closing mid-fetch; start_task deletes it when done.
+        start_task(
+            lambda cancel_event, report_progress: fetch_book_urls(sitemap_url),
+            self._on_sitemap_fetched,
+            parent=self.parent(),
+        )
 
-    def _on_sitemap_fetched(self):
-        thread = self._sitemap_thread
-        self._sitemap_thread = None
-
+    def _on_sitemap_fetched(self, result, error_text):
         if self._is_closed:
             return
 
-        if thread.error:
-            self.status_label.setText(f"Failed to fetch sitemap: {thread.error}")
+        if error_text:
+            self.status_label.setText(f"Failed to fetch sitemap: {error_text}")
             return
 
-        self._sitemap_failure_count = len(thread.failures)
-        unlinked_urls = [
-            url for url in thread.urls if normalize_url(url) not in self._already_linked_urls
-        ]
+        urls, failures = result
+        self._sitemap_failure_count = len(failures)
+        unlinked_urls = [url for url in urls if normalize_url(url) not in self._already_linked_urls]
 
         if not unlinked_urls:
-            message = f"All {len(thread.urls)} blog reviews are already linked."
+            message = f"All {len(urls)} blog reviews are already linked."
             if self._sitemap_failure_count:
                 message += f" {self._sitemap_failure_count} sitemap(s) failed to load."
             self.status_label.setText(message)
