@@ -3,12 +3,8 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from calibre_plugins.blog_rating_sync.constants import PLUGIN_VERSION_STRING
 from qt.core import QObject, QThread, pyqtSignal
-
-try:
-    from calibre_plugins.blog_rating_sync.constants import PLUGIN_VERSION_STRING
-except ImportError:
-    from constants import PLUGIN_VERSION_STRING
 
 FETCH_TIMEOUT_SECONDS = 10
 REQUEST_DELAY_SECONDS = 0.5

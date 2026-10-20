@@ -1,10 +1,7 @@
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
-try:
-    from calibre_plugins.blog_rating_sync.network import fetch_bytes
-except ImportError:
-    from network import fetch_bytes
+from calibre_plugins.blog_rating_sync.network import fetch_bytes
 
 SITEMAP_NAMESPACE = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 MAX_SITEMAP_DEPTH = 3

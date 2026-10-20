@@ -1,7 +1,4 @@
-try:
-    from calibre_plugins.blog_rating_sync.scraper import extract_rating
-except ImportError:
-    from scraper import extract_rating
+from calibre_plugins.blog_rating_sync.scraper import extract_rating
 
 CALIBRE_STARS_MULTIPLIER = 2
 
