@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.zip
 .coverage
+.hypothesis/
 .venv/
 
 # Local working plan for the current branch.
