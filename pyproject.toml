@@ -51,11 +51,10 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests/stubs"]
-addopts = ["--cov"]
+addopts = ["--cov=plugin"]
 
 [tool.coverage.run]
 branch = true
-source = ["plugin"]
 
 [tool.coverage.report]
 # Calibre GUI code: dialogs and plugin entry points. The stub Qt can import

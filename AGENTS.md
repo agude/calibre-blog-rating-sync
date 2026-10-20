@@ -19,6 +19,7 @@ just lock         # regenerate uv.lock after changing dependencies
 just lint         # ruff check + ruff format --check + actionlint + zizmor (read-only)
 just format       # ruff format + ruff check --fix (mutating)
 just test         # pytest
+just test tests/test_sync.py --no-cov  # run one file; --no-cov skips the gate
 just check        # everything CI runs: lint + test
 just build        # produce BlogRatingSync.zip for loading into Calibre
 just bump patch   # bump the version in constants.py and pyproject.toml
