@@ -1,4 +1,4 @@
-from scraper import match_score
+from calibre_plugins.blog_rating_sync.scraper import match_score
 
 
 def test_exact_title_and_author():

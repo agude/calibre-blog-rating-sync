@@ -1,4 +1,4 @@
-from sync import apply_fetched_ratings, collect_linked_books
+from calibre_plugins.blog_rating_sync.sync import apply_fetched_ratings, collect_linked_books
 
 REVIEW_HTML = """<script type="application/ld+json">{
   "@type": "Review",

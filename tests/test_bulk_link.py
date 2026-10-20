@@ -1,6 +1,4 @@
-from unittest.mock import MagicMock
-
-from bulk_link import (
+from calibre_plugins.blog_rating_sync.bulk_link import (
     MatchCandidate,
     ReviewMatch,
     _BulkMatchModel,
@@ -38,14 +36,6 @@ def _match(url, candidates, selected_index=0):
 
 def _model(rows):
     return _BulkMatchModel(rows)
-
-
-def _index(model, row):
-    """Return a mock index for COL_CALIBRE_MATCH at the given row."""
-    idx = MagicMock()
-    idx.row.return_value = row
-    idx.column.return_value = _BulkMatchModel.COL_CALIBRE_MATCH
-    return idx
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +156,7 @@ def test_setdata_rejects_string_value():
     # The base-class setModelData bug passed a str; setData must reject it.
     data = [_match("url_a", [_candidate(1)], selected_index=0)]
     m = _model(data)
-    idx = _index(m, 0)
+    idx = m.index(0, _BulkMatchModel.COL_CALIBRE_MATCH)
     result = m.setData(idx, "1", _EDIT_ROLE)
     assert result is False
     assert data[0].selected_index == 0
@@ -180,7 +170,7 @@ def test_setdata_clears_all_conflicts_including_incoming_row():
         _match("url_c", [_candidate(1)], selected_index=1),  # row 2: conflict
     ]
     m = _model(data)
-    m.setData(_index(m, 0), 1, _EDIT_ROLE)
+    m.setData(m.index(0, _BulkMatchModel.COL_CALIBRE_MATCH), 1, _EDIT_ROLE)
     assert data[0].selected_index == 0
     assert data[1].selected_index == 0
     assert data[2].selected_index == 0
@@ -192,7 +182,7 @@ def test_setdata_writes_value_when_no_conflict():
         _match("url_b", [_candidate(2)], selected_index=1),
     ]
     m = _model(data)
-    result = m.setData(_index(m, 0), 1, _EDIT_ROLE)
+    result = m.setData(m.index(0, _BulkMatchModel.COL_CALIBRE_MATCH), 1, _EDIT_ROLE)
     assert result is True
     assert data[0].selected_index == 1
 
@@ -202,6 +192,6 @@ def test_setdata_skip_selection_always_writes():
         _match("url_a", [_candidate(1)], selected_index=1),
     ]
     m = _model(data)
-    result = m.setData(_index(m, 0), 0, _EDIT_ROLE)
+    result = m.setData(m.index(0, _BulkMatchModel.COL_CALIBRE_MATCH), 0, _EDIT_ROLE)
     assert result is True
     assert data[0].selected_index == 0

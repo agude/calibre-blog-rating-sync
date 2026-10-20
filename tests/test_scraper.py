@@ -1,4 +1,4 @@
-from scraper import (
+from calibre_plugins.blog_rating_sync.scraper import (
     _normalize_rating,
     extract_book_info,
     extract_jsonld_blocks,

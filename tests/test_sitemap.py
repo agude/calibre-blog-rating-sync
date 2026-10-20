@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import pytest
-from sitemap import fetch_book_urls
+from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -25,7 +25,10 @@ PREFIXED_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def test_fetch_book_urls():
-    with patch("sitemap.fetch_bytes", return_value=SAMPLE_SITEMAP.encode("utf-8")):
+    with patch(
+        "calibre_plugins.blog_rating_sync.sitemap.fetch_bytes",
+        return_value=SAMPLE_SITEMAP.encode("utf-8"),
+    ):
         urls = fetch_book_urls("https://alexgude.com/sitemap.xml")
 
     assert "https://alexgude.com/books/hyperion/" in urls
@@ -39,7 +42,10 @@ def test_fetch_book_urls():
 
 
 def test_fetch_book_urls_with_namespace_prefix():
-    with patch("sitemap.fetch_bytes", return_value=PREFIXED_SITEMAP.encode("utf-8")):
+    with patch(
+        "calibre_plugins.blog_rating_sync.sitemap.fetch_bytes",
+        return_value=PREFIXED_SITEMAP.encode("utf-8"),
+    ):
         urls = fetch_book_urls("https://alexgude.com/sitemap.xml")
 
     assert len(urls) == 2
