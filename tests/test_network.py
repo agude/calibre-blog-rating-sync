@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock, patch
-
 import pytest
 from calibre_plugins.blog_rating_sync.network import fetch_page, validate_url
 
@@ -27,36 +25,24 @@ def test_rejects_empty_scheme():
         validate_url("/etc/passwd")
 
 
-def _mock_response(body, charset):
-    response = MagicMock()
-    response.read.return_value = body
-    response.headers.get_content_charset.return_value = charset
-    response.__enter__ = lambda self: self
-    response.__exit__ = MagicMock(return_value=False)
-    return response
+def test_fetch_page_uses_declared_charset(http_server):
+    http_server.route(
+        "/page",
+        headers={"Content-Type": "text/html; charset=latin-1"},
+        body="café".encode("latin-1"),
+    )
+    assert fetch_page(http_server.url("/page")) == "café"
 
 
-def test_fetch_page_uses_declared_charset():
-    body = "café".encode("latin-1")
-    with patch(
-        "calibre_plugins.blog_rating_sync.network.urlopen",
-        return_value=_mock_response(body, "latin-1"),
-    ):
-        assert fetch_page("https://example.com/") == "café"
+def test_fetch_page_defaults_to_utf8(http_server):
+    http_server.route("/page", headers={"Content-Type": "text/html"}, body="café".encode())
+    assert fetch_page(http_server.url("/page")) == "café"
 
 
-def test_fetch_page_defaults_to_utf8():
-    body = "café".encode()
-    with patch(
-        "calibre_plugins.blog_rating_sync.network.urlopen", return_value=_mock_response(body, None)
-    ):
-        assert fetch_page("https://example.com/") == "café"
-
-
-def test_fetch_page_unknown_charset_falls_back_to_utf8():
-    body = "café".encode()
-    with patch(
-        "calibre_plugins.blog_rating_sync.network.urlopen",
-        return_value=_mock_response(body, "bogus-charset"),
-    ):
-        assert fetch_page("https://example.com/") == "café"
+def test_fetch_page_unknown_charset_falls_back_to_utf8(http_server):
+    http_server.route(
+        "/page",
+        headers={"Content-Type": "text/html; charset=bogus-charset"},
+        body="café".encode(),
+    )
+    assert fetch_page(http_server.url("/page")) == "café"
