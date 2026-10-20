@@ -11,6 +11,14 @@ dev = [
     "ruff>=0.16",
 ]
 
+[tool.uv]
+# Ignore releases younger than a week, so a compromised upload has time to be
+# noticed and yanked before it reaches the lock. Dependabot's cooldown matches.
+exclude-newer = "7 days"
+# Dependabot uses uv 0.12.18 to update the lock on Python 3.11.
+# Use uv 0.13 or newer to download the final release of Python 3.15.
+required-version = ">=0.12.18"
+
 [tool.ruff]
 # Calibre ships its own interpreter; keep the plugin runnable on the oldest
 # version the CI matrix covers.

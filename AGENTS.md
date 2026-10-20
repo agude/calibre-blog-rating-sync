@@ -15,6 +15,7 @@ contract). The pre-commit hook and CI call these same recipes.
 
 ```bash
 just sync         # install dependencies
+just lock         # regenerate uv.lock after changing dependencies
 just lint         # ruff check + ruff format --check (read-only)
 just format       # ruff format + ruff check --fix (mutating)
 just test         # pytest
