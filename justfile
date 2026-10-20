@@ -26,6 +26,8 @@ test *args:
 lint:
     uv run --locked ruff check plugin/ tests/
     uv run --locked ruff format --check plugin/ tests/
+    uv run --locked actionlint
+    uv run --locked zizmor --pedantic --quiet .
 
 # Format code and apply safe lint fixes
 format:

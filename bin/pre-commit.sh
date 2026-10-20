@@ -6,12 +6,6 @@
 # definition of what "clean" means; the hook, CI, and the developer all call
 # it. Install with `just hooks-install`.
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
-
-if [ -z "$STAGED" ]; then
-    exit 0
-fi
-
 if ! command -v just >/dev/null 2>&1; then
     echo "❌ just is not on PATH; cannot run the pre-commit checks." >&2
     echo "   Install just, or commit with --no-verify if you accept the risk." >&2
@@ -19,7 +13,7 @@ if ! command -v just >/dev/null 2>&1; then
 fi
 
 echo "---"
-echo "Running lint on staged Python files..."
+echo "Running lint..."
 echo "---"
 
 if ! just lint; then
