@@ -4,10 +4,9 @@ from typing import ClassVar, List, Optional
 from calibre_plugins.blog_rating_sync.config import prefs
 from calibre_plugins.blog_rating_sync.network import start_batch_fetch
 from calibre_plugins.blog_rating_sync.scraper import (
-    extract_book_info,
-    extract_rating,
-    find_canonical_url,
     match_score,
+    normalize_url,
+    parse_review_page,
 )
 from calibre_plugins.blog_rating_sync.sitemap import fetch_book_urls
 from calibre_plugins.blog_rating_sync.sync import apply_links
@@ -208,7 +207,7 @@ class BulkLinkDialog(QDialog):
         for book_id in self.db.all_book_ids():
             url = self.db.field_for(self.column, book_id)
             if url:
-                already_linked_urls.add(url.rstrip("/"))
+                already_linked_urls.add(normalize_url(url))
                 continue
             title = self.db.field_for("title", book_id)
             authors = self.db.field_for("authors", book_id) or ()
@@ -237,7 +236,7 @@ class BulkLinkDialog(QDialog):
 
         self._sitemap_failure_count = len(thread.failures)
         unlinked_urls = [
-            url for url in thread.urls if url.rstrip("/") not in self._already_linked_urls
+            url for url in thread.urls if normalize_url(url) not in self._already_linked_urls
         ]
 
         if not unlinked_urls:
@@ -280,20 +279,18 @@ class BulkLinkDialog(QDialog):
                 error_count += 1
                 continue
 
-            canonical = find_canonical_url(html)
-            if canonical and canonical.rstrip("/") != url.rstrip("/"):
+            page = parse_review_page(url, html)
+            if page.is_outdated:
                 skipped_canonical_count += 1
                 continue
 
-            blog_title, blog_authors = extract_book_info(html)
-            blog_rating = extract_rating(html)
-            if not blog_title:
+            if not page.title:
                 error_count += 1
                 continue
 
             scored = []
             for book_id, (calibre_title, calibre_authors) in self._calibre_books.items():
-                score = match_score(blog_title, blog_authors, calibre_title, calibre_authors)
+                score = match_score(page.title, page.authors, calibre_title, calibre_authors)
                 if score >= MINIMUM_MATCH_SCORE:
                     scored.append(
                         MatchCandidate(
@@ -314,9 +311,9 @@ class BulkLinkDialog(QDialog):
 
             matches.append(
                 ReviewMatch(
-                    blog_title=blog_title,
-                    blog_authors=", ".join(blog_authors),
-                    blog_rating=blog_rating,
+                    blog_title=page.title,
+                    blog_authors=", ".join(page.authors),
+                    blog_rating=page.rating,
                     blog_url=url,
                     candidates=candidates,
                     selected_index=selected_index,

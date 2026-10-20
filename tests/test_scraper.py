@@ -1,10 +1,13 @@
 from calibre_plugins.blog_rating_sync.scraper import (
+    ReviewPage,
     _normalize_rating,
-    extract_book_info,
-    extract_jsonld_blocks,
     extract_rating,
-    find_canonical_url,
+    normalize_url,
+    parse_html,
+    parse_review_page,
 )
+
+URL = "https://alexgude.com/books/hyperion/"
 
 SAMPLE_JSONLD = """{
   "@context": "https://schema.org",
@@ -33,18 +36,18 @@ SAMPLE_HTML = f"""<!DOCTYPE html>
 </html>"""
 
 
-def test_extract_jsonld_blocks():
-    blocks = extract_jsonld_blocks(SAMPLE_HTML)
+def test_parse_html_jsonld_blocks():
+    blocks = parse_html(SAMPLE_HTML).jsonld_blocks
     assert len(blocks) == 1
     assert blocks[0]["@type"] == "Review"
 
 
-def test_extract_jsonld_blocks_skips_malformed():
+def test_parse_html_jsonld_blocks_skips_malformed():
     html = """
     <script type="application/ld+json">{not valid json}</script>
     <script type="application/ld+json">{"@type": "Review"}</script>
     """
-    blocks = extract_jsonld_blocks(html)
+    blocks = parse_html(html).jsonld_blocks
     assert len(blocks) == 1
     assert blocks[0]["@type"] == "Review"
 
@@ -117,13 +120,13 @@ def test_normalize_rating_clamps_to_range():
     assert result == 5
 
 
-def test_extract_book_info():
-    title, authors = extract_book_info(SAMPLE_HTML)
-    assert title == "Hyperion"
-    assert authors == ["Dan Simmons"]
+def test_parse_review_page_book_info():
+    page = parse_review_page(URL, SAMPLE_HTML)
+    assert page.title == "Hyperion"
+    assert page.authors == ["Dan Simmons"]
 
 
-def test_extract_book_info_multiple_authors():
+def test_parse_review_page_multiple_authors():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {
@@ -135,25 +138,74 @@ def test_extract_book_info_multiple_authors():
         ]
       }
     }</script>"""
-    title, authors = extract_book_info(html)
-    assert title == "Good Omens"
-    assert authors == ["Terry Pratchett", "Neil Gaiman"]
+    page = parse_review_page(URL, html)
+    assert page.title == "Good Omens"
+    assert page.authors == ["Terry Pratchett", "Neil Gaiman"]
 
 
-def test_extract_book_info_missing():
-    title, authors = extract_book_info("<html></html>")
-    assert title is None
-    assert authors is None
+def test_parse_review_page_missing_book_info():
+    page = parse_review_page(URL, "<html></html>")
+    assert page.title is None
+    assert page.authors is None
 
 
-def test_find_canonical_url():
-    url = find_canonical_url(SAMPLE_HTML)
-    assert url == "https://alexgude.com/books/hyperion/"
+def test_parse_review_page_canonical_url():
+    page = parse_review_page(URL, SAMPLE_HTML)
+    assert page.canonical_url == "https://alexgude.com/books/hyperion/"
 
 
-def test_find_canonical_url_missing():
-    url = find_canonical_url("<html><head></head></html>")
-    assert url is None
+def test_parse_review_page_canonical_url_missing():
+    page = parse_review_page(URL, "<html><head></head></html>")
+    assert page.canonical_url is None
+
+
+def test_parse_review_page_full():
+    page = parse_review_page(URL, SAMPLE_HTML)
+    assert page == ReviewPage(
+        url=URL,
+        canonical_url="https://alexgude.com/books/hyperion/",
+        is_outdated=False,
+        title="Hyperion",
+        authors=["Dan Simmons"],
+        rating=4,
+    )
+
+
+def test_parse_review_page_outdated_when_canonical_differs():
+    html = '<link rel="canonical" href="https://alexgude.com/books/hyperion-2/">'
+    page = parse_review_page(URL, html)
+    assert page.canonical_url == "https://alexgude.com/books/hyperion-2/"
+    assert page.is_outdated is True
+
+
+def test_parse_review_page_not_outdated_when_only_trailing_slash_differs():
+    page = parse_review_page("https://alexgude.com/books/hyperion", SAMPLE_HTML)
+    assert page.canonical_url == "https://alexgude.com/books/hyperion/"
+    assert page.is_outdated is False
+
+
+def test_parse_review_page_without_review():
+    page = parse_review_page(URL, "<html><body>no review</body></html>")
+    assert page == ReviewPage(
+        url=URL,
+        canonical_url=None,
+        is_outdated=False,
+        title=None,
+        authors=None,
+        rating=None,
+    )
+
+
+def test_normalize_url_strips_trailing_slashes():
+    assert normalize_url("https://alexgude.com/books/hyperion/") == (
+        "https://alexgude.com/books/hyperion"
+    )
+    assert normalize_url("https://alexgude.com/books/hyperion//") == (
+        "https://alexgude.com/books/hyperion"
+    )
+    assert normalize_url("https://alexgude.com/books/hyperion") == (
+        "https://alexgude.com/books/hyperion"
+    )
 
 
 def test_extract_rating_non_review_jsonld_ignored():
@@ -202,15 +254,16 @@ def test_normalize_rating_non_dict():
     assert _normalize_rating("4 stars") is None
 
 
-def test_extract_book_info_string_author():
+def test_parse_review_page_string_author():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {"@type": "Book", "name": "Dune", "author": "Frank Herbert"}
     }</script>"""
-    assert extract_book_info(html) == ("Dune", ["Frank Herbert"])
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == ("Dune", ["Frank Herbert"])
 
 
-def test_extract_book_info_mixed_author_list():
+def test_parse_review_page_mixed_author_list():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {
@@ -219,26 +272,29 @@ def test_extract_book_info_mixed_author_list():
         "author": ["Terry Pratchett", {"@type": "Person", "name": "Neil Gaiman"}]
       }
     }</script>"""
-    assert extract_book_info(html) == ("Good Omens", ["Terry Pratchett", "Neil Gaiman"])
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == ("Good Omens", ["Terry Pratchett", "Neil Gaiman"])
 
 
-def test_extract_book_info_item_reviewed_string():
+def test_parse_review_page_item_reviewed_string():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": "Dune"
     }</script>"""
-    assert extract_book_info(html) == (None, None)
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == (None, None)
 
 
-def test_extract_book_info_no_author():
+def test_parse_review_page_no_author():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {"@type": "Book", "name": "Anonymous Work"}
     }</script>"""
-    assert extract_book_info(html) == ("Anonymous Work", [])
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == ("Anonymous Work", [])
 
 
-def test_extract_book_info_nameless_author_object():
+def test_parse_review_page_nameless_author_object():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {
@@ -247,10 +303,11 @@ def test_extract_book_info_nameless_author_object():
         "author": {"@type": "Person"}
       }
     }</script>"""
-    assert extract_book_info(html) == ("Anonymous Work", [])
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == ("Anonymous Work", [])
 
 
-def test_extract_book_info_whitespace_author_dropped():
+def test_parse_review_page_whitespace_author_dropped():
     html = """<script type="application/ld+json">{
       "@type": "Review",
       "itemReviewed": {
@@ -263,7 +320,8 @@ def test_extract_book_info_whitespace_author_dropped():
         ]
       }
     }</script>"""
-    assert extract_book_info(html) == ("Good Omens", ["Neil Gaiman"])
+    page = parse_review_page(URL, html)
+    assert (page.title, page.authors) == ("Good Omens", ["Neil Gaiman"])
 
 
 def test_normalize_rating_rejects_nan():
@@ -292,9 +350,9 @@ def test_extract_rating_nan_literal_in_json():
     assert extract_rating(html) is None
 
 
-def test_extract_jsonld_blocks_survives_deep_nesting():
+def test_parse_html_jsonld_blocks_survives_deep_nesting():
     html = '<script type="application/ld+json">' + "[" * 10000 + "]" * 10000 + "</script>"
-    assert isinstance(extract_jsonld_blocks(html), list)
+    assert isinstance(parse_html(html).jsonld_blocks, list)
 
 
 def test_normalize_rating_rejects_huge_integer():

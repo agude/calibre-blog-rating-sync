@@ -1,9 +1,5 @@
 from calibre_plugins.blog_rating_sync.network import fetch_page
-from calibre_plugins.blog_rating_sync.scraper import (
-    extract_book_info,
-    extract_rating,
-    find_canonical_url,
-)
+from calibre_plugins.blog_rating_sync.scraper import parse_review_page
 from qt.core import (
     QDialog,
     QHBoxLayout,
@@ -110,22 +106,21 @@ class LinkDialog(QDialog):
     def _on_fetch_succeeded(self, url, html):
         self.fetch_button.setEnabled(True)
 
-        canonical = find_canonical_url(html)
-        if canonical and canonical.rstrip("/") != url.rstrip("/"):
+        page = parse_review_page(url, html)
+        if page.is_outdated:
             self.status_label.setText(
-                f"This is an old review. Canonical URL: {canonical}\nUse the canonical URL instead."
+                "This is an old review. Canonical URL: "
+                f"{page.canonical_url}\nUse the canonical URL instead."
             )
             return
 
-        blog_title, blog_authors = extract_book_info(html)
-        blog_rating = extract_rating(html)
-        if not blog_title:
+        if not page.title:
             self.status_label.setText("No book review found in page JSON-LD.")
             return
 
-        author_string = ", ".join(blog_authors) if blog_authors else "Unknown"
-        rating_string = f" (rating: {blog_rating})" if blog_rating else ""
-        self.status_label.setText(f'Review found: "{blog_title}" by {author_string}{rating_string}')
+        author_string = ", ".join(page.authors) if page.authors else "Unknown"
+        rating_string = f" (rating: {page.rating})" if page.rating else ""
+        self.status_label.setText(f'Review found: "{page.title}" by {author_string}{rating_string}')
 
         self._fetched_url = url
         self.link_button.setEnabled(True)

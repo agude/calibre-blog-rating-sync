@@ -1,4 +1,6 @@
-from calibre_plugins.blog_rating_sync.scraper import extract_book_info, match_score
+from calibre_plugins.blog_rating_sync.scraper import match_score, parse_review_page
+
+URL = "https://alexgude.com/books/anonymous-work/"
 
 
 def test_exact_title_and_author():
@@ -113,6 +115,6 @@ def test_nameless_author_review_scores_on_title_alone():
         "author": {"@type": "Person"}
       }
     }</script>"""
-    title, authors = extract_book_info(html)
-    score = match_score(title, authors, "Anonymous Work", ["Some Author"])
+    page = parse_review_page(URL, html)
+    score = match_score(page.title, page.authors, "Anonymous Work", ["Some Author"])
     assert score == 0.5

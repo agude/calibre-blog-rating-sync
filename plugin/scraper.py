@@ -1,8 +1,10 @@
 import contextlib
 import json
 import math
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
+from typing import List, Optional
 
 TARGET_SCALE = 5
 MATCH_THRESHOLD = 0.5
@@ -44,10 +46,6 @@ def parse_html(html):
     return parser
 
 
-def find_canonical_url(html):
-    return parse_html(html).canonical_url
-
-
 def _is_review(item):
     """JSON-LD @type may be a single string or a list of types."""
     declared_type = item.get("@type")
@@ -71,10 +69,6 @@ def _iter_review_blocks(blocks):
             for graph_item in graph:
                 if isinstance(graph_item, dict) and _is_review(graph_item):
                     yield graph_item
-
-
-def extract_jsonld_blocks(html):
-    return parse_html(html).jsonld_blocks
 
 
 def _normalize_rating(review_rating):
@@ -124,11 +118,6 @@ def extract_rating_from_blocks(blocks):
     return None
 
 
-def extract_book_info(html):
-    """Returns (title, authors_list) or (None, None) if not found."""
-    return extract_book_info_from_blocks(parse_html(html).jsonld_blocks)
-
-
 def extract_book_info_from_blocks(blocks):
     """Returns (title, authors_list) or (None, None) if not found."""
     for review in _iter_review_blocks(blocks):
@@ -150,6 +139,35 @@ def _author_names(author_data):
         if isinstance(name, str) and name.strip():
             names.append(name.strip())
     return names
+
+
+def normalize_url(url):
+    return url.rstrip("/")
+
+
+@dataclass
+class ReviewPage:
+    url: str
+    canonical_url: Optional[str]
+    is_outdated: bool
+    title: Optional[str]
+    authors: Optional[List[str]]
+    rating: Optional[float]
+
+
+def parse_review_page(url, html):
+    """Parse a review page in one pass. title and authors are None when no review is found."""
+    parsed = parse_html(html)
+    canonical_url = parsed.canonical_url
+    title, authors = extract_book_info_from_blocks(parsed.jsonld_blocks)
+    return ReviewPage(
+        url=url,
+        canonical_url=canonical_url,
+        is_outdated=bool(canonical_url) and normalize_url(canonical_url) != normalize_url(url),
+        title=title,
+        authors=authors,
+        rating=extract_rating_from_blocks(parsed.jsonld_blocks),
+    )
 
 
 def _normalize_for_comparison(text):
