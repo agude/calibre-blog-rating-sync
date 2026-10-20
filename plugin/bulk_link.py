@@ -64,11 +64,12 @@ class _SitemapFetchThread(QThread):
         super().__init__(parent)
         self._sitemap_url = sitemap_url
         self.urls = []
+        self.failures = []
         self.error = None
 
     def run(self):
         try:
-            self.urls = fetch_book_urls(self._sitemap_url)
+            self.urls, self.failures = fetch_book_urls(self._sitemap_url)
         except Exception as error:
             self.error = str(error)
 
@@ -185,6 +186,7 @@ class BulkLinkDialog(QDialog):
         self._already_linked_urls = set()
         self._progress = None
         self._sitemap_thread = None
+        self._sitemap_failure_count = 0
         self._fetch_worker = None
         self._is_closed = False
 
@@ -233,12 +235,16 @@ class BulkLinkDialog(QDialog):
             self.status_label.setText(f"Failed to fetch sitemap: {thread.error}")
             return
 
+        self._sitemap_failure_count = len(thread.failures)
         unlinked_urls = [
             url for url in thread.urls if url.rstrip("/") not in self._already_linked_urls
         ]
 
         if not unlinked_urls:
-            self.status_label.setText(f"All {len(thread.urls)} blog reviews are already linked.")
+            message = f"All {len(thread.urls)} blog reviews are already linked."
+            if self._sitemap_failure_count:
+                message += f" {self._sitemap_failure_count} sitemap(s) failed to load."
+            self.status_label.setText(message)
             return
 
         self._progress = QProgressDialog(
@@ -334,6 +340,8 @@ class BulkLinkDialog(QDialog):
             summary_parts.append(f"{skipped_canonical_count} old reviews skipped (have canonical).")
         if error_count:
             summary_parts.append(f"{error_count} URL(s) failed to fetch.")
+        if self._sitemap_failure_count:
+            summary_parts.append(f"{self._sitemap_failure_count} sitemap(s) failed to load.")
         summary_parts.append("Pick the correct Calibre book for each row, or set to Skip.")
         self.status_label.setText(" ".join(summary_parts))
 

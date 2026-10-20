@@ -7,26 +7,45 @@ SITEMAP_NAMESPACE = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 MAX_SITEMAP_DEPTH = 3
 
 
-def fetch_book_urls(sitemap_url, path_prefix="/books/", _depth=0):
+def fetch_book_urls(sitemap_url, path_prefix="/books/"):
     """Fetch all book review URLs from a sitemap.xml.
 
-    Handles both flat urlset sitemaps and sitemap index files.
+    Handles both flat urlset sitemaps and sitemap index files. Returns
+    (urls, failures). urls are unique, in first-seen order. failures lists
+    (child_sitemap_url, error_text) for each child sitemap that could not be
+    fetched or parsed; those children are skipped. An error in sitemap_url
+    itself is raised.
     """
-    if _depth > MAX_SITEMAP_DEPTH:
-        return []
+    urls = []
+    failures = []
+    _collect_book_urls(sitemap_url, path_prefix, 0, urls, failures)
+    return list(dict.fromkeys(urls)), failures
+
+
+def _collect_book_urls(sitemap_url, path_prefix, depth, urls, failures):
+    """Append the book URLs under sitemap_url to urls, and child errors to failures.
+
+    Sitemaps deeper than MAX_SITEMAP_DEPTH are not fetched, and nothing is
+    recorded for them.
+    """
+    if depth > MAX_SITEMAP_DEPTH:
+        return
 
     root = ET.fromstring(fetch_bytes(sitemap_url))
 
     sub_sitemaps = root.findall(".//sm:sitemap/sm:loc", SITEMAP_NAMESPACE)
     if sub_sitemaps:
-        urls = []
         for loc in sub_sitemaps:
             if loc.text:
-                urls.extend(fetch_book_urls(loc.text, path_prefix, _depth + 1))
-        return urls
+                try:
+                    _collect_book_urls(loc.text, path_prefix, depth + 1, urls, failures)
+                except Exception as error:
+                    failures.append((loc.text, str(error) or type(error).__name__))
+        return
 
     all_urls = [loc.text for loc in root.findall(".//sm:loc", SITEMAP_NAMESPACE) if loc.text]
-    return [url for url in all_urls if _is_book_page(url, path_prefix)]
+    book_urls = [url for url in all_urls if _is_book_page(url, path_prefix)]
+    urls.extend(book_urls)
 
 
 def _is_book_page(url, path_prefix):
