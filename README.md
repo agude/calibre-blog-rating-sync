@@ -14,7 +14,8 @@ half stars (Calibre stores ratings as 0–10 internally).
 
 ## Requirements
 
-- Calibre 5.0 or newer.
+- Calibre 5.13 or newer. It is the first release with the `qt.core` module
+  the plugin imports.
 - A blog whose review pages embed JSON-LD like:
 
   ```html

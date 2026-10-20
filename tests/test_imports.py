@@ -22,3 +22,4 @@ def test_plugin_class_loads():
     spec.loader.exec_module(plugin_init)
 
     assert plugin_init.BlogRatingSyncPlugin.version == PLUGIN_VERSION
+    assert plugin_init.BlogRatingSyncPlugin.minimum_calibre_version == (5, 13, 0)

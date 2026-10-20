@@ -27,8 +27,9 @@ just hooks-install  # install bin/pre-commit.sh into this clone
 ## Constraints that are not ours to choose
 
 - **Python 3.8.** Calibre ships its own interpreter; the floor is set by the
-  oldest Calibre release we support, not by preference. `requires-python`
-  and the CI matrix floor both say 3.8 for that reason.
+  oldest Calibre release we support, not by preference. That release is
+  Calibre 5.13, which bundles Python 3.8.5. `requires-python` and the CI
+  matrix floor both say 3.8 for that reason.
 - **No `type-check` recipe.** The plugin imports `calibre.*` and `qt.core`
   at runtime. Neither is installable from PyPI, so mypy cannot resolve them
   outside a Calibre install. The project-standards audit reports the missing

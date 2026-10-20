@@ -10,7 +10,7 @@ class BlogRatingSyncPlugin(InterfaceActionBase):
     supported_platforms: ClassVar = ["windows", "osx", "linux"]
     author = "Alex Gude"
     version = PLUGIN_VERSION
-    minimum_calibre_version = (5, 0, 0)
+    minimum_calibre_version = (5, 13, 0)
 
     actual_plugin = "calibre_plugins.blog_rating_sync.ui:BlogRatingSyncAction"
 
