@@ -1,3 +1,5 @@
+from typing import List
+
 from calibre_plugins.blog_rating_sync.scraper import extract_rating
 
 CALIBRE_STARS_MULTIPLIER = 2
@@ -13,6 +15,11 @@ def collect_linked_books(db, column):
         title = db.field_for("title", book_id)
         linked_books[book_id] = (title, url)
     return linked_books
+
+
+def unique_urls(linked_books) -> List[str]:
+    """Return the linked URLs without duplicates, in first-seen order."""
+    return list(dict.fromkeys(url for _, url in linked_books.values()))
 
 
 def apply_fetched_ratings(db, linked_books, fetch_results):
@@ -58,6 +65,27 @@ def apply_fetched_ratings(db, linked_books, fetch_results):
         db.set_field("rating", new_ratings)
 
     return updated, skipped, errors
+
+
+def format_sync_report(updated, skipped, errors, was_cancelled=False) -> str:
+    """Return the text shown after a sync: updated, skipped, and error lines."""
+    lines = []
+    if was_cancelled:
+        lines.append("Sync cancelled — showing partial results.\n")
+    if updated:
+        lines.append(f"Updated {len(updated)} rating(s):")
+        for title, old_stars, new_stars in updated:
+            lines.append(f"  {title}: {old_stars} → {new_stars}")
+    if skipped:
+        lines.append(f"\nSkipped {len(skipped)} (rating unchanged).")
+    if errors:
+        lines.append(f"\nErrors ({len(errors)}):")
+        for title, error_message in errors:
+            lines.append(f"  {title}: {error_message}")
+    if not updated and not errors and not was_cancelled:
+        lines.append("All linked books already up to date.")
+
+    return "\n".join(lines)
 
 
 def to_calibre_rating(stars):

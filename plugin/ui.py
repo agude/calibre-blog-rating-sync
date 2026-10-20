@@ -46,6 +46,7 @@ class BlogRatingSyncAction(InterfaceAction):
         from calibre_plugins.blog_rating_sync.sync import (
             apply_fetched_ratings,
             collect_linked_books,
+            unique_urls,
         )
 
         if self._sync_in_progress:
@@ -62,7 +63,7 @@ class BlogRatingSyncAction(InterfaceAction):
             info_dialog(self.gui, "Blog Rating Sync", "No linked books found.", show=True)
             return
 
-        urls = list({url for _, (_, url) in linked_books.items()})
+        urls = unique_urls(linked_books)
 
         progress = QProgressDialog("Syncing ratings...", "Cancel", 0, len(urls), self.gui)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -84,23 +85,10 @@ class BlogRatingSyncAction(InterfaceAction):
         )
 
     def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):
-        lines = []
-        if was_cancelled:
-            lines.append("Sync cancelled — showing partial results.\n")
-        if updated:
-            lines.append(f"Updated {len(updated)} rating(s):")
-            for title, old_stars, new_stars in updated:
-                lines.append(f"  {title}: {old_stars} → {new_stars}")
-        if skipped:
-            lines.append(f"\nSkipped {len(skipped)} (rating unchanged).")
-        if errors:
-            lines.append(f"\nErrors ({len(errors)}):")
-            for title, error_message in errors:
-                lines.append(f"  {title}: {error_message}")
-        if not updated and not errors and not was_cancelled:
-            lines.append("All linked books already up to date.")
+        from calibre_plugins.blog_rating_sync.sync import format_sync_report
 
-        info_dialog(self.gui, "Blog Rating Sync", "\n".join(lines), show=True)
+        text = format_sync_report(updated, skipped, errors, was_cancelled)
+        info_dialog(self.gui, "Blog Rating Sync", text, show=True)
         if updated:
             self.gui.library_view.model().refresh()
 

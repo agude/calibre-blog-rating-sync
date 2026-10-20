@@ -1,8 +1,10 @@
 from calibre_plugins.blog_rating_sync.sync import (
     apply_fetched_ratings,
     collect_linked_books,
+    format_sync_report,
     to_calibre_rating,
     to_stars,
+    unique_urls,
 )
 
 REVIEW_HTML = """<script type="application/ld+json">{
@@ -201,3 +203,57 @@ def test_apply_makes_no_write_when_nothing_changed():
     apply_fetched_ratings(db, linked, fetch_results)
 
     assert db.set_field_calls == []
+
+
+def test_unique_urls_keeps_first_seen_order():
+    linked = {
+        1: ("Hyperion", "https://example.com/hyperion/"),
+        2: ("Blindsight", "https://example.com/blindsight/"),
+        3: ("Hyperion (second copy)", "https://example.com/hyperion/"),
+        4: ("Accelerando", "https://example.com/accelerando/"),
+    }
+
+    assert unique_urls(linked) == [
+        "https://example.com/hyperion/",
+        "https://example.com/blindsight/",
+        "https://example.com/accelerando/",
+    ]
+
+
+def test_format_sync_report_updated_and_errors():
+    text = format_sync_report(
+        [("Hyperion", 3, 5), ("Accelerando", 2.5, 3.5)],
+        [],
+        [("Blindsight", "404 Not Found")],
+    )
+
+    assert text == (
+        "Updated 2 rating(s):\n"
+        "  Hyperion: 3 → 5\n"
+        "  Accelerando: 2.5 → 3.5\n"
+        "\n"
+        "Errors (1):\n"
+        "  Blindsight: 404 Not Found"
+    )
+
+
+def test_format_sync_report_skipped_only():
+    # Unchanged ratings count as up to date, so the closing line follows.
+    text = format_sync_report([], ["Hyperion", "Accelerando"], [])
+
+    assert text == ("\nSkipped 2 (rating unchanged).\nAll linked books already up to date.")
+
+
+def test_format_sync_report_all_up_to_date():
+    assert format_sync_report([], [], []) == "All linked books already up to date."
+
+
+def test_format_sync_report_cancelled():
+    text = format_sync_report([("Hyperion", 3, 5)], [], [], was_cancelled=True)
+
+    assert text == (
+        "Sync cancelled — showing partial results.\n\nUpdated 1 rating(s):\n  Hyperion: 3 → 5"
+    )
+    assert format_sync_report([], [], [], was_cancelled=True) == (
+        "Sync cancelled — showing partial results.\n"
+    )
