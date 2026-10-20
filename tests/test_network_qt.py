@@ -156,3 +156,26 @@ def test_bad_status_line_still_finishes(qt_app, qt_network, monkeypatch):
             False,
         )
     ]
+
+
+def test_start_task_runs_off_main_thread_and_finishes_on_main_thread(qt_app, qt_network):
+    task_threads = []
+    finished = []
+
+    def task(cancel_event, report_progress):
+        task_threads.append(QtCore.QThread.currentThread())
+        return "value"
+
+    def on_finished(result, error_text):
+        finished.append((QtCore.QThread.currentThread(), result, error_text))
+
+    thread, _worker = qt_network.start_task(task, on_finished)
+    try:
+        wait_until(qt_app, lambda: bool(finished))
+    finally:
+        join_thread(qt_app, thread)
+
+    main_thread = qt_app.thread()
+    assert len(task_threads) == 1
+    assert task_threads[0] != main_thread
+    assert finished == [(main_thread, "value", None)]
