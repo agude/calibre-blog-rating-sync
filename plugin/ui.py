@@ -14,6 +14,8 @@ class BlogRatingSyncAction(InterfaceAction):
         menu.addAction("Link URL to selected book...", self.link_single_book)
         menu.addAction("Unlink selected books", self.unlink_selected_books)
         self.qaction.setMenu(menu)
+        # Calibre 5.13's injected get_icons takes only the file name; 6.0 added the plugin name.
+        self.qaction.setIcon(get_icons("images/icon.png"))
         self.qaction.triggered.connect(self.sync_ratings)
 
         self._sync_in_progress = False
