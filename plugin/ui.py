@@ -10,6 +10,7 @@ class BlogRatingSyncAction(InterfaceAction):
     def genesis(self):
         menu = QMenu(self.gui)
         menu.addAction("Sync linked ratings", self.sync_ratings)
+        menu.addAction("Update selected books from blog", self.sync_selected_books)
         menu.addAction("Bulk link from sitemap...", self.bulk_link)
         menu.addAction("Link URL to selected book...", self.link_single_book)
         menu.addAction("Unlink selected books", self.unlink_selected_books)
@@ -44,12 +45,7 @@ class BlogRatingSyncAction(InterfaceAction):
         return column
 
     def sync_ratings(self):
-        from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
-        from calibre_plugins.blog_rating_sync.sync import (
-            apply_fetched_ratings,
-            collect_linked_books,
-            unique_urls,
-        )
+        from calibre_plugins.blog_rating_sync.sync import collect_linked_books
 
         if self._sync_in_progress:
             info_dialog(self.gui, "Blog Rating Sync", "A sync is already running.", show=True)
@@ -64,6 +60,44 @@ class BlogRatingSyncAction(InterfaceAction):
         if not linked_books:
             info_dialog(self.gui, "Blog Rating Sync", "No linked books found.", show=True)
             return
+
+        self._start_sync(db, linked_books)
+
+    def sync_selected_books(self):
+        from calibre_plugins.blog_rating_sync.sync import collect_linked_books
+
+        if self._sync_in_progress:
+            info_dialog(self.gui, "Blog Rating Sync", "A sync is already running.", show=True)
+            return
+
+        db = self._get_db()
+        column = self._validate_column(db)
+        if column is None:
+            return
+
+        selected_ids = self.gui.library_view.get_selected_ids()
+        if not selected_ids:
+            error_dialog(self.gui, "Blog Rating Sync", "No books selected.", show=True)
+            return
+
+        linked_books = collect_linked_books(db, column, book_ids=selected_ids)
+        if not linked_books:
+            info_dialog(
+                self.gui,
+                "Blog Rating Sync",
+                "None of the selected books has a review URL. "
+                'Use "Link URL to selected book..." first.',
+                show=True,
+            )
+            return
+
+        not_linked = len(selected_ids) - len(linked_books)
+        self._start_sync(db, linked_books, not_linked=not_linked)
+
+    def _start_sync(self, db, linked_books, not_linked=0):
+        """Fetch the linked reviews in a background task, then apply their ratings."""
+        from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
+        from calibre_plugins.blog_rating_sync.sync import apply_fetched_ratings, unique_urls
 
         urls = unique_urls(linked_books)
 
@@ -88,7 +122,7 @@ class BlogRatingSyncAction(InterfaceAction):
                 return
             fetch_results, was_cancelled = result
             updated, skipped, errors = apply_fetched_ratings(db, linked_books, fetch_results)
-            self._show_sync_results(updated, skipped, errors, was_cancelled)
+            self._show_sync_results(updated, skipped, errors, was_cancelled, not_linked)
 
         self._sync_in_progress = True
         start_task(
@@ -101,10 +135,10 @@ class BlogRatingSyncAction(InterfaceAction):
             parent=self.gui,
         )
 
-    def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):
+    def _show_sync_results(self, updated, skipped, errors, was_cancelled=False, not_linked=0):
         from calibre_plugins.blog_rating_sync.sync import format_sync_report
 
-        text = format_sync_report(updated, skipped, errors, was_cancelled)
+        text = format_sync_report(updated, skipped, errors, was_cancelled, not_linked)
         info_dialog(self.gui, "Blog Rating Sync", text, show=True)
         if updated:
             self.gui.library_view.model().refresh()
