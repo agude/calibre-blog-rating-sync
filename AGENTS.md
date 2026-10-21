@@ -45,6 +45,13 @@ just hooks-install  # install bin/pre-commit.sh into this clone
 ## Layout
 
 - `plugin/` — the plugin itself; this directory is what gets zipped.
+- `assets/` — source artwork; `just build` does not zip it.
+  `assets/icon.svg` is the source of `plugin/images/icon.png` (128×128,
+  transparent). Re-render it from the repository root with:
+
+  ```bash
+  QT_QPA_PLATFORM=offscreen uv run --locked python -c "from PyQt6.QtCore import Qt; from PyQt6.QtGui import QGuiApplication, QImage, QPainter; from PyQt6.QtSvg import QSvgRenderer; app = QGuiApplication([]); renderer = QSvgRenderer('assets/icon.svg'); assert renderer.isValid(); image = QImage(128, 128, QImage.Format.Format_ARGB32); image.fill(Qt.GlobalColor.transparent); painter = QPainter(image); painter.setRenderHint(QPainter.RenderHint.Antialiasing); renderer.render(painter); painter.end(); assert image.save('plugin/images/icon.png')"
+  ```
 - `tests/` — pytest suite. Imports the plugin modules directly, so the
   Calibre-dependent modules are exercised only where they can be stubbed.
 - `bin/pre-commit.sh` — the hook; installed by `just hooks-install`.
