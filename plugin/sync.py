@@ -5,10 +5,16 @@ from calibre_plugins.blog_rating_sync.scraper import extract_rating
 CALIBRE_STARS_MULTIPLIER = 2
 
 
-def collect_linked_books(db, column):
-    """Return {book_id: (title, url)} for all books with a linked review URL."""
+def collect_linked_books(db, column, book_ids=None):
+    """Return {book_id: (title, url)} for books with a linked review URL.
+
+    Considers only `book_ids`, in the given order, when it is not None;
+    otherwise every book in the library.
+    """
+    if book_ids is None:
+        book_ids = db.all_book_ids()
     linked_books = {}
-    for book_id in db.all_book_ids():
+    for book_id in book_ids:
         url = db.field_for(column, book_id)
         if not url:
             continue
@@ -88,8 +94,12 @@ def apply_links(db, column, links) -> int:
     return len(ratings)
 
 
-def format_sync_report(updated, skipped, errors, was_cancelled=False) -> str:
-    """Return the text shown after a sync: updated, skipped, and error lines."""
+def format_sync_report(updated, skipped, errors, was_cancelled=False, not_linked=0) -> str:
+    """Return the text shown after a sync: updated, skipped, and error lines.
+
+    A non-zero `not_linked` adds a closing line counting the selected books
+    that have no review URL.
+    """
     lines = []
     if was_cancelled:
         lines.append("Sync cancelled — showing partial results.\n")
@@ -105,6 +115,8 @@ def format_sync_report(updated, skipped, errors, was_cancelled=False) -> str:
             lines.append(f"  {title}: {error_message}")
     if not updated and not errors and not was_cancelled:
         lines.append("All linked books already up to date.")
+    if not_linked:
+        lines.append(f"\n{not_linked} selected book(s) have no review URL.")
 
     return "\n".join(lines)
 

@@ -56,6 +56,33 @@ def test_collect_linked_books():
     assert linked[3] == ("Accelerando", "https://example.com/accelerando/")
 
 
+def test_collect_linked_books_limited_to_given_ids():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "#blog_url": "https://example.com/hyperion/"},
+            2: {"title": "Blindsight", "#blog_url": None},
+            3: {"title": "Accelerando", "#blog_url": "https://example.com/accelerando/"},
+            4: {"title": "Permutation City", "#blog_url": None},
+        }
+    )
+    linked = collect_linked_books(db, "#blog_url", book_ids=[1, 2])
+
+    assert linked == {1: ("Hyperion", "https://example.com/hyperion/")}
+
+
+def test_collect_linked_books_keeps_given_order():
+    db = FakeDb(
+        {
+            1: {"title": "Hyperion", "#blog_url": "https://example.com/hyperion/"},
+            2: {"title": "Blindsight", "#blog_url": None},
+            3: {"title": "Accelerando", "#blog_url": "https://example.com/accelerando/"},
+        }
+    )
+    linked = collect_linked_books(db, "#blog_url", book_ids=[3, 1])
+
+    assert list(linked) == [3, 1]
+
+
 def test_apply_updates_rating():
     db = FakeDb(
         {
@@ -328,4 +355,15 @@ def test_format_sync_report_cancelled():
     )
     assert format_sync_report([], [], [], was_cancelled=True) == (
         "Sync cancelled — showing partial results.\n"
+    )
+
+
+def test_format_sync_report_counts_unlinked_selection():
+    text = format_sync_report([("Hyperion", 3, 5)], [], [], not_linked=2)
+
+    assert text == (
+        "Updated 1 rating(s):\n  Hyperion: 3 → 5\n\n2 selected book(s) have no review URL."
+    )
+    assert format_sync_report([], [], [], not_linked=1) == (
+        "All linked books already up to date.\n\n1 selected book(s) have no review URL."
     )
