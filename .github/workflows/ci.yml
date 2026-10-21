@@ -2,12 +2,7 @@
 # the pipeline changes — not when the tooling does.
 name: CI
 
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
-    branches: [main]
+on: [push, pull_request]
 
 permissions: {}
 
