@@ -10,10 +10,13 @@ class BlogRatingSyncAction(InterfaceAction):
     def genesis(self):
         menu = QMenu(self.gui)
         menu.addAction("Sync linked ratings", self.sync_ratings)
+        menu.addAction("Update selected books from blog", self.sync_selected_books)
         menu.addAction("Bulk link from sitemap...", self.bulk_link)
         menu.addAction("Link URL to selected book...", self.link_single_book)
         menu.addAction("Unlink selected books", self.unlink_selected_books)
         self.qaction.setMenu(menu)
+        # Calibre 5.13's injected get_icons takes only the file name; 6.0 added the plugin name.
+        self.qaction.setIcon(get_icons("images/icon.png"))
         self.qaction.triggered.connect(self.sync_ratings)
 
         self._sync_in_progress = False
@@ -42,11 +45,7 @@ class BlogRatingSyncAction(InterfaceAction):
         return column
 
     def sync_ratings(self):
-        from calibre_plugins.blog_rating_sync.network import start_batch_fetch
-        from calibre_plugins.blog_rating_sync.sync import (
-            apply_fetched_ratings,
-            collect_linked_books,
-        )
+        from calibre_plugins.blog_rating_sync.sync import collect_linked_books
 
         if self._sync_in_progress:
             info_dialog(self.gui, "Blog Rating Sync", "A sync is already running.", show=True)
@@ -62,7 +61,45 @@ class BlogRatingSyncAction(InterfaceAction):
             info_dialog(self.gui, "Blog Rating Sync", "No linked books found.", show=True)
             return
 
-        urls = list({url for _, (_, url) in linked_books.items()})
+        self._start_sync(db, linked_books)
+
+    def sync_selected_books(self):
+        from calibre_plugins.blog_rating_sync.sync import collect_linked_books
+
+        if self._sync_in_progress:
+            info_dialog(self.gui, "Blog Rating Sync", "A sync is already running.", show=True)
+            return
+
+        db = self._get_db()
+        column = self._validate_column(db)
+        if column is None:
+            return
+
+        selected_ids = self.gui.library_view.get_selected_ids()
+        if not selected_ids:
+            error_dialog(self.gui, "Blog Rating Sync", "No books selected.", show=True)
+            return
+
+        linked_books = collect_linked_books(db, column, book_ids=selected_ids)
+        if not linked_books:
+            info_dialog(
+                self.gui,
+                "Blog Rating Sync",
+                "None of the selected books has a review URL. "
+                'Use "Link URL to selected book..." first.',
+                show=True,
+            )
+            return
+
+        not_linked = len(selected_ids) - len(linked_books)
+        self._start_sync(db, linked_books, not_linked=not_linked)
+
+    def _start_sync(self, db, linked_books, not_linked=0):
+        """Fetch the linked reviews in a background task, then apply their ratings."""
+        from calibre_plugins.blog_rating_sync.network import fetch_all, start_task
+        from calibre_plugins.blog_rating_sync.sync import apply_fetched_ratings, unique_urls
+
+        urls = unique_urls(linked_books)
 
         progress = QProgressDialog("Syncing ratings...", "Cancel", 0, len(urls), self.gui)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -72,34 +109,37 @@ class BlogRatingSyncAction(InterfaceAction):
             progress.setValue(index)
             progress.setLabelText(f"Fetching {index + 1}/{total}...")
 
-        def on_finished(fetch_results, was_cancelled):
+        def on_finished(result, error_text):
             self._sync_in_progress = False
             progress.setValue(progress.maximum())
+            if error_text:
+                error_dialog(
+                    self.gui,
+                    "Blog Rating Sync",
+                    f"Sync failed: {error_text}",
+                    show=True,
+                )
+                return
+            fetch_results, was_cancelled = result
             updated, skipped, errors = apply_fetched_ratings(db, linked_books, fetch_results)
-            self._show_sync_results(updated, skipped, errors, was_cancelled)
+            self._show_sync_results(updated, skipped, errors, was_cancelled, not_linked)
 
         self._sync_in_progress = True
-        _thread, worker = start_batch_fetch(urls, on_progress, on_finished, parent=self.gui)
-        progress.canceled.connect(worker.cancel)
+        start_task(
+            lambda cancel_event, report_progress: fetch_all(
+                urls, cancel_event=cancel_event, on_progress=report_progress
+            ),
+            on_finished,
+            on_progress=on_progress,
+            cancel_signal=progress.canceled,
+            parent=self.gui,
+        )
 
-    def _show_sync_results(self, updated, skipped, errors, was_cancelled=False):
-        lines = []
-        if was_cancelled:
-            lines.append("Sync cancelled — showing partial results.\n")
-        if updated:
-            lines.append(f"Updated {len(updated)} rating(s):")
-            for title, old_stars, new_stars in updated:
-                lines.append(f"  {title}: {old_stars} → {new_stars}")
-        if skipped:
-            lines.append(f"\nSkipped {len(skipped)} (rating unchanged).")
-        if errors:
-            lines.append(f"\nErrors ({len(errors)}):")
-            for title, error_message in errors:
-                lines.append(f"  {title}: {error_message}")
-        if not updated and not errors and not was_cancelled:
-            lines.append("All linked books already up to date.")
+    def _show_sync_results(self, updated, skipped, errors, was_cancelled=False, not_linked=0):
+        from calibre_plugins.blog_rating_sync.sync import format_sync_report
 
-        info_dialog(self.gui, "Blog Rating Sync", "\n".join(lines), show=True)
+        text = format_sync_report(updated, skipped, errors, was_cancelled, not_linked)
+        info_dialog(self.gui, "Blog Rating Sync", text, show=True)
         if updated:
             self.gui.library_view.model().refresh()
 

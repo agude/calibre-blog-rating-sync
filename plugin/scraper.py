@@ -1,7 +1,10 @@
+import contextlib
 import json
 import math
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
+from typing import List, Optional
 
 TARGET_SCALE = 5
 MATCH_THRESHOLD = 0.5
@@ -33,20 +36,14 @@ class _JsonLdExtractor(HTMLParser):
         if tag == "script" and self._in_jsonld:
             self._in_jsonld = False
             raw = "".join(self._current_data)
-            try:
+            with contextlib.suppress(ValueError, RecursionError):
                 self.jsonld_blocks.append(json.loads(raw))
-            except (json.JSONDecodeError, ValueError):
-                pass
 
 
 def parse_html(html):
     parser = _JsonLdExtractor()
     parser.feed(html)
     return parser
-
-
-def find_canonical_url(html):
-    return parse_html(html).canonical_url
 
 
 def _is_review(item):
@@ -74,10 +71,6 @@ def _iter_review_blocks(blocks):
                     yield graph_item
 
 
-def extract_jsonld_blocks(html):
-    return parse_html(html).jsonld_blocks
-
-
 def _normalize_rating(review_rating):
     """Normalize a rating to the 1-5 scale using bestRating/worstRating.
 
@@ -94,7 +87,10 @@ def _normalize_rating(review_rating):
         value = float(raw)
         best = float(review_rating.get("bestRating", TARGET_SCALE))
         worst = float(review_rating.get("worstRating", 1))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+    if not all(math.isfinite(number) for number in (value, best, worst)):
         return None
 
     if best <= worst:
@@ -122,11 +118,6 @@ def extract_rating_from_blocks(blocks):
     return None
 
 
-def extract_book_info(html):
-    """Returns (title, authors_list) or (None, None) if not found."""
-    return extract_book_info_from_blocks(parse_html(html).jsonld_blocks)
-
-
 def extract_book_info_from_blocks(blocks):
     """Returns (title, authors_list) or (None, None) if not found."""
     for review in _iter_review_blocks(blocks):
@@ -144,11 +135,39 @@ def _author_names(author_data):
     entries = author_data if isinstance(author_data, list) else [author_data]
     names = []
     for entry in entries:
-        if isinstance(entry, str):
-            names.append(entry)
-        elif isinstance(entry, dict):
-            names.append(entry.get("name", ""))
+        name = entry.get("name") if isinstance(entry, dict) else entry
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
     return names
+
+
+def normalize_url(url):
+    return url.rstrip("/")
+
+
+@dataclass
+class ReviewPage:
+    url: str
+    canonical_url: Optional[str]
+    is_outdated: bool
+    title: Optional[str]
+    authors: Optional[List[str]]
+    rating: Optional[float]
+
+
+def parse_review_page(url, html):
+    """Parse a review page in one pass. title and authors are None when no review is found."""
+    parsed = parse_html(html)
+    canonical_url = parsed.canonical_url
+    title, authors = extract_book_info_from_blocks(parsed.jsonld_blocks)
+    return ReviewPage(
+        url=url,
+        canonical_url=canonical_url,
+        is_outdated=bool(canonical_url) and normalize_url(canonical_url) != normalize_url(url),
+        title=title,
+        authors=authors,
+        rating=extract_rating_from_blocks(parsed.jsonld_blocks),
+    )
 
 
 def _normalize_for_comparison(text):
@@ -182,10 +201,7 @@ def _author_similarity(authors_a, authors_b):
 
     total = 0.0
     for author_a in authors_a:
-        best = max(
-            _single_author_similarity(author_a, author_b)
-            for author_b in authors_b
-        )
+        best = max(_single_author_similarity(author_a, author_b) for author_b in authors_b)
         total += best
     return total / len(authors_a)
 

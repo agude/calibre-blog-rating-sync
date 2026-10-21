@@ -14,7 +14,8 @@ half stars (Calibre stores ratings as 0–10 internally).
 
 ## Requirements
 
-- Calibre 5.0 or newer.
+- Calibre 5.13 or newer. It is the first release with the `qt.core` module
+  the plugin imports.
 - A blog whose review pages embed JSON-LD like:
 
   ```html
@@ -66,10 +67,12 @@ select `BlogRatingSync.zip` → restart Calibre.
 
 ## Usage
 
-The toolbar button's menu has four actions:
+The toolbar button's menu has five actions:
 
 - **Sync linked ratings** (also the default toolbar action) — fetch every
   linked review and update ratings that changed.
+- **Update selected books from blog** — fetch only the linked reviews of the
+  selected books and update their ratings. Use it after linking a new book.
 - **Bulk link from sitemap...** — discover review pages via the sitemap,
   match them to unlinked Calibre books by title/author similarity, and
   review the proposed matches in a table before linking. Each Calibre book
@@ -78,6 +81,13 @@ The toolbar button's menu has four actions:
 - **Link URL to selected book...** — paste a review URL for one selected
   book; the plugin fetches the page and shows what it found before linking.
 - **Unlink selected books** — clear the review URL for the selected books.
+
+To show the same menu when you right-click a book, add the plugin to that
+menu. On first install, Calibre asks where to add the plugin. Later, go to
+**Preferences → Toolbars & menus**. Set the location to
+"The context menu for the books in the calibre library", and add
+"Blog Rating Sync". Right-clicking a book then shows Blog Rating Sync with
+the same submenu as the toolbar button.
 
 ## Development
 
